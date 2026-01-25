@@ -1,0 +1,97 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2024-06-06 00:19+0200\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: contrib/permit/routes_abstract.py:353
+msgid "Available for editing"
+msgstr ""
+
+#: contrib/permit/routes_abstract.py:363
+msgid "Available for deletion"
+msgstr ""
+
+#: contrib/permit/routes_abstract.py:373
+msgid "Available for creation"
+msgstr ""
+
+#: contrib/permit/routes_abstract.py:385
+msgid "Available actions"
+msgstr ""
+
+#: contrib/permit/models_abstract.py:96
+msgid "User roles"
+msgstr ""
+
+#: contrib/permit/models_abstract.py:99
+msgid "Current user role"
+msgstr ""
+
+#: contrib/permit/models.py:17
+msgid "Label"
+msgstr ""
+
+#: contrib/permit/models.py:32
+msgid "Name"
+msgstr ""
+
+#: contrib/permit/models.py:42
+#: contrib/permit/models.py:56
+msgid "Permission Groups"
+msgstr ""
+
+#: contrib/permit/models.py:43
+msgid "For Anonymous Users"
+msgstr ""
+
+#: contrib/permit/models.py:44
+msgid "System Role"
+msgstr ""
+
+#: contrib/permit/models.py:47
+msgid "Role"
+msgstr ""
+
+#: contrib/permit/models.py:48
+#: contrib/permit/admin_abstract.py:19
+msgid "Roles"
+msgstr ""
+
+#: contrib/permit/models.py:52
+#: contrib/permit/models.py:62
+msgid "Permissions"
+msgstr ""
+
+#: contrib/permit/models.py:55
+msgid "Permission Group"
+msgstr ""
+
+#: contrib/permit/models.py:61
+msgid "Permission"
+msgstr ""
+
+#: contrib/permit/conf.py:8
+msgid "Time to store user permissions, sec"
+msgstr ""
+
+#: contrib/permit/apps.py:7
+msgid "Permit"
+msgstr ""
+
+#: contrib/permit/router.py:8
+msgid "Role model"
+msgstr ""

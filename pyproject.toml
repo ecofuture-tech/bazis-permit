@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=80", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages.find = { include = ["bazis.*"] }
+include-package-data = true
+
+[tool.setuptools_scm]
+version_file = "bazis/contrib/permit/_version.py"
+version_scheme = "no-guess-dev"
+local_scheme = "no-local-version"
+
+[project]
+name = "bazis-permit"
+description = "Permissions module for Bazis framework."
+keywords = ["bazis", "django", "fastapi", "pydantic", "framework", "jsonapi", "permissions"]
+urls = { Home = "https://github.com/ecofuture-tech/bazis-permit" }
+authors = [{name = "Ilya Kharyn", email = "ilya.tt07@gmail.com"}]
+maintainers = [{name = "Ilya Kharyn", email = "ilya.tt07@gmail.com"}]
+dynamic = ["version"]
+readme = "README.md"
+requires-python = ">=3.12"
+classifiers = [
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Framework :: Django",
+    "Framework :: FastAPI",
+]
+dependencies = [
+    "bazis",
+    "bazis-users"
+]
+
+[project.optional-dependencies]
+test = [
+    "bazis-test-utils"
+]
+dev = [
+    "ruff"
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["migrations", ".venv", "build", "dist", "docs", "__pycache__"]
+extend-include = ["*.pyi"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "B",    # bugbear
+    "UP",   # pyupgrade
+    "C90",  # mccabe
+]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.isort]
+section-order = [
+    "future",
+    "standard-library",
+    "django",
+    "fastapi",
+    "starlette",
+    "pydantic",
+    "third-party",
+    "bazis",
+    "first-party",
+    "local-folder"
+]
+sections = { "django" = ["django"], "fastapi" = ["fastapi"], "starlette" = ["starlette"], "pydantic" = ["pydantic"], "bazis" = ["bazis"] }
+lines-after-imports = 2
+
+[tool.pytest.ini_options]
+django_settings_module = "sample.settings"

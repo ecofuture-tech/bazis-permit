@@ -1,0 +1,7 @@
+sphinx
+sphinx_rtd_theme
+sphinx_autodoc_typehints
+uvicorn[standart]
+gunicorn
+bazis-setup>=0.1.1
+-e ..
