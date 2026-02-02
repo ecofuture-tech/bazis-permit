@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from django.db import models
-from bazis.core.utils.orm import calc_property, FieldJson
 from django.utils.translation import gettext_lazy as _
 
 from bazis_test_utils.models_abstract import (
@@ -29,6 +28,7 @@ from bazis.contrib.users import get_user_model
 from bazis.core.models_abstract import DtMixin, JsonApiMixin, UuidMixin
 from bazis.core.triggers import FieldsTransferTrigger, FieldTransferSchema
 from bazis.core.utils import triggers as bazis_triggers
+from bazis.core.utils.orm import FieldJson, calc_property
 
 
 User = get_user_model()

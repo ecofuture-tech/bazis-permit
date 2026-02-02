@@ -18,7 +18,7 @@ import logging
 from collections import UserDict, defaultdict
 from collections.abc import Callable, Iterable
 from functools import reduce
-from typing import Any
+from typing import Any, Self
 
 from django.db.models import Case, IntegerField, QuerySet, Value, When
 from django.utils.functional import cached_property
@@ -460,7 +460,7 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
 
     @class_or_instance_method
     def restrict_queryset(
-        self: type['PermitRouteBase'] | 'PermitRouteBase',
+        self: type[Self] | Self,
         qs: QuerySet,
         access_action: AccessAction,
         user: User = None,

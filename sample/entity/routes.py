@@ -16,7 +16,7 @@ from django.apps import apps
 
 from bazis.contrib.author.routes_abstract import AuthorRouteBase
 from bazis.contrib.permit.routes_abstract import PermitRouteBase
-from bazis.core.schemas import SchemaFields, SchemaField
+from bazis.core.schemas import SchemaField, SchemaFields
 
 
 class ChildEntityRouteSet(PermitRouteBase, AuthorRouteBase):

@@ -12,13 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pytest
 from urllib.parse import quote
+
+import pytest
 from bazis_test_utils.utils import get_api_client
+
 from bazis.contrib.permit.models import GroupPermission, Permission, Role
 from bazis.contrib.users import get_user_model
 
 from tests import factories
+
 
 User = get_user_model()
 
