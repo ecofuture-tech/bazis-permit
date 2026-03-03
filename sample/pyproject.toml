@@ -4,8 +4,8 @@ version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
     "bazis-permit",
-    "bazis-author",
-    "bazis-test-utils",
+    "bazis-author>=2.2.0",
+    "bazis-test-utils>=2.2.0",
 ]
 
 [tool.uv.sources]
