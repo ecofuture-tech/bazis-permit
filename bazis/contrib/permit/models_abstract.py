@@ -28,9 +28,9 @@ from translated_fields import TranslatedFieldWithFallback
 
 from bazis.contrib.users.models_abstract import UserMixin
 from bazis.core.models_abstract import DtMixin, InitialBase, JsonApiMixin, UuidMixin
+from bazis.core.utils import triggers
 from bazis.core.utils.orm import apply_calc_queryset
 from bazis.core.utils.query_complex import QueryComplex, QueryComplexItem, QueryToOrm
-from bazis.core.utils import triggers
 
 from .schemas import ATTR_SELECTORS, PermitStructMixin, SelectorField
 from .triggers import TriggerRoleCurrentInRoles, TriggerSetDefaultUserRole

@@ -30,7 +30,7 @@ class TriggerRoleCurrentInRoles(pgtrigger.Trigger):
         ).column
 
         if model is not UserModel:
-            return f"""
+            return """
                 IF TG_OP = 'DELETE' THEN
                     RETURN OLD;
                 END IF;
