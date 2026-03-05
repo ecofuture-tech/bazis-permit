@@ -58,8 +58,16 @@ class TriggerRoleCurrentInRoles(pgtrigger.Trigger):
             END IF;
 
             IF NEW.{role_current_col} IS NULL THEN
-                -- Keep NULL as-is. This allows FK on_delete=SET_NULL when role is deleted.
-                RETURN NEW;
+                SELECT th.{through_role_col}
+                    INTO NEW.{role_current_col}
+                    FROM {through_table} th
+                    WHERE th.{through_user_col} = NEW.{user_pk_col}
+                    ORDER BY th.{through_role_col}
+                    LIMIT 1;
+
+                IF NEW.{role_current_col} IS NULL THEN
+                    RETURN NEW;
+                END IF;
             END IF;
 
             PERFORM 1
