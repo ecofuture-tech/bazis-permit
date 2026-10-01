@@ -26,7 +26,8 @@ def check_relations_view(app_configs, **kwargs):
     Without the relations check a user can link objects he cannot see (and unlink the
     objects of a reverse relation he cannot change).
     """
-    if not settings.BAZIS_PERMIT_RELATIONS_VIEW_CHECK:
+    # the settings of the package are missing if BS_BAZIS_APPS does not list it
+    if not getattr(settings, 'BAZIS_PERMIT_RELATIONS_VIEW_CHECK', False):
         return [
             Warning(
                 'The objects referenced by relationships are not checked against the '
@@ -46,12 +47,14 @@ def check_routes_permit(app_configs, **kwargs):
     application is loaded (`manage.py bazis_doctor`).
     """
     from bazis.core.introspect import loaded_app, route_sets
+
+    if (app := loaded_app()) is None:
+        return []
+
     from bazis.core.routes_abstract.jsonapi import JsonapiRouteBase
 
     from .routes_abstract import PermitRouteBase
 
-    if (app := loaded_app()) is None:
-        return []
     return [
         Warning(
             f'The route {route_cls.__module__}.{route_cls.__qualname__} does not check '

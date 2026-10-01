@@ -29,9 +29,14 @@ import = "bazis.contrib.permit.models_abstract.UserPermitMixin"
 use_when = "the user model: roles and the current role"
 
 [[extension_points]]
+name = "AnonymousUserPermitMixin"
+import = "bazis.contrib.permit.models_abstract.AnonymousUserPermitMixin"
+use_when = "the anonymous user model: the roles for anonymous users"
+
+[[extension_points]]
 name = "PermitSelectorMixin"
 import = "bazis.contrib.permit.models_abstract.PermitSelectorMixin"
-use_when = "a model that links objects to users (e.g. an organization) for selectors"
+use_when = "a model that is a selector source: the user model (for `author`), an organization"
 
 [[pitfalls]]
 text = "BAZIS_PERMIT_RELATIONS_VIEW_CHECK is off by default: relations are not checked"
