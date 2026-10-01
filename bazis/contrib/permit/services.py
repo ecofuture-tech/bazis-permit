@@ -32,9 +32,9 @@ from bazis.core.schemas import AccessAction
 from bazis.core.utils.query_complex import QueryComplex
 
 from .schemas import (
-    PERMS_CACHE_PREFIX,
     PermitContext,
     PermitStructMixin,
+    perms_cache_key,
 )
 from .utils import selector_to_complex
 
@@ -221,10 +221,10 @@ class PermitService:
         if not self.user.role_current:
             return {}
 
-        cache_key = f'{PERMS_CACHE_PREFIX}{self.user.role_current.slug}'
+        cache_key = perms_cache_key(self.user.role_current.slug)
 
-        # try to get permissions from cache
-        if perms := cache.get(cache_key):
+        # try to get permissions from cache (a role without permissions is cached too)
+        if (perms := cache.get(cache_key)) is not None:
             return perms
 
         permissions = list(
