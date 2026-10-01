@@ -40,3 +40,5 @@ class PermitConfig(BaseConfig):
         from .models_abstract import PermitModelMixin
 
         PermitModelMixin.setup_selectors_fields()
+
+        from . import checks  # noqa: F401  registers the system checks

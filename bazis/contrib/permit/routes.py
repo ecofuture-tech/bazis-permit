@@ -26,3 +26,5 @@ class RoleRoute(JsonapiRouteBase):
 
     model = apps.get_model('permit.Role')
     actions = ['action_list', 'action_retrieve']
+    #: the roles are a public catalog (see the check permit.W002)
+    permit_public = True
