@@ -33,13 +33,15 @@ classifiers = [
     "Framework :: FastAPI",
 ]
 dependencies = [
-    "bazis>=2.2.0",
-    "bazis-users>=2.2.0"
+    "bazis>=2.3.1",
+    "bazis-users>=2.3.0",
 ]
 
 [project.optional-dependencies]
 test = [
-    "bazis-test-utils>=2.2.0"
+    "bazis-test-utils>=2.3.0",
+    # the sample project uses AuthorMixin
+    "bazis-author>=2.3.0",
 ]
 dev = [
     "ruff"

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import re
 from typing import TYPE_CHECKING
 
@@ -23,6 +24,9 @@ from bazis.core.schemas import CrudAccessAction
 from bazis.core.utils.query_complex import QueryComplex, QueryComplexItem
 
 from .schemas import PERM_ALL, PERM_SELF
+
+
+logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -51,10 +55,16 @@ def is_model_permit(model: 'JsonApiMixin'):
     """
     from .routes_abstract import PermitRouteBase
 
-    if issubclass(model.get_default_route(), PermitRouteBase):
-        return True
+    get_default_route = getattr(model, 'get_default_route', None)
+    if get_default_route is None:
+        return False
+    route = get_default_route()
+    return isinstance(route, type) and issubclass(route, PermitRouteBase)
 
-    return False
+
+def _match_nothing(node: QueryComplexItem):
+    node.key = 'pk__isnull'
+    node.value = True
 
 
 def _selectors_perform(query: QueryComplex, user: 'User', struct: 'PermitStructMixin'):
@@ -64,7 +74,11 @@ def _selectors_perform(query: QueryComplex, user: 'User', struct: 'PermitStructM
                 if node.key == PERM_ALL:
                     node.delete()
 
-                elif not user.is_anonymous:
+                elif user.is_anonymous:
+                    # an anonymous user is nobody's selector: the permission matches nothing
+                    _match_nothing(node)
+
+                else:
                     # get the selector field model
                     selector_model = struct.get_selector_model(node.key)
 
@@ -79,8 +93,14 @@ def _selectors_perform(query: QueryComplex, user: 'User', struct: 'PermitStructM
                                 node.value = selector_value
                                 node = struct.selector_extending(node)
                         else:
-                            node.key = 'pk__isnull'
-                            node.value = True
+                            _match_nothing(node)
+                    else:
+                        logger.warning(
+                            'Permit: %s has no selector %r, the permission matches nothing',
+                            struct.get_resource_label(),
+                            node.key,
+                        )
+                        _match_nothing(node)
 
         if isinstance(node, QueryComplex):
             _selectors_perform(node, user, struct)

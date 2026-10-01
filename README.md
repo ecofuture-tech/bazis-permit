@@ -282,6 +282,31 @@ entity.parent.field.change.all.child_entities.filter:child_is_active=true
 ```
 Only items with child_is_active=true can be added to child_entities
 
+### Related Objects
+
+By default an item can reference any existing object through its relationships, including
+objects the user cannot view. Three tools restrict this:
+
+- **`BAZIS_PERMIT_RELATIONS_VIEW_CHECK = True`** (recommended): a created or changed item can
+  reference only the objects of permission-protected models that the user can view (`view`
+  permission). Other references fail with `403` and the error code `ERR_RELATION_ACCESS`.
+  Only newly referenced objects are checked, so an unchanged relation to an object that
+  became invisible does not block a change. A route can override the setting with
+  `relations_view_check = True/False`.
+- **`check` permissions** are verified on the saved item, whose selectors are filled at that
+  point (also by triggers): `entity.extended_entity.item.check.author_parent` allows creating
+  and changing extended entities only for the author of the parent entity.
+- **`filter:` field permissions** restrict the objects a relation can reference (see above).
+
+### Permission Cache
+
+The permissions of a role are cached for `BAZIS_PERMISSION_CACHE_EXPIRE` seconds (7 by
+default). Any change of roles, permission groups, permissions or their relations
+invalidates the cache of all roles.
+
+An anonymous user matches no selector: a selector permission (e.g. `view.author`) of the
+role for anonymous users allows nothing.
+
 ### Selectors
 
 Selectors allow linking permissions with specific objects through field values.
