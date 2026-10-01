@@ -651,13 +651,15 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
                 status=400,
             ) from None
 
-    def check_relations_access(self, data: Any, item: JsonApiMixin = None):
+    def check_relations_access(self, data: Any, item: JsonApiMixin = None, action: str = 'set'):
         """
         Checks that the objects referenced by the relationships of the item data are
         visible to the user (the view permission of their model). A reverse relationship
-        changes the referenced objects (their foreign key), so they must be changeable
-        (the change permission). For a changed item only the objects that are not
-        referenced yet are checked. Models without a permission route are not checked.
+        changes the referenced objects (their foreign key), so the objects it links and
+        the objects it unlinks must be changeable (the change permission). For a changed
+        item only the objects whose link changes are checked. `action` is the action of
+        the relationships endpoints (`add`, `remove`, `set`; an update sets the value).
+        Models without a permission route are not checked.
         """
         enabled = self.relations_view_check
         if enabled is None:
@@ -676,38 +678,51 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
                 continue
 
             ids = self._relation_ids(value, rel_model)
-            if item is not None and ids:
+            unlinked = set()
+            if item is not None:
                 if field_info.to_many:
-                    current = getattr(item, f_name).values_list('pk', flat=True)
-                    ids -= {str(pk) for pk in current}
+                    current = {str(pk) for pk in getattr(item, f_name).values_list('pk', flat=True)}
                 elif not field_info.reverse:
-                    ids.discard(str(getattr(item, field_info.model_field.attname, None)))
-                elif current := getattr(item, f_name, None):
-                    ids.discard(str(current.pk))
-            if not ids:
-                continue
+                    pk = getattr(item, field_info.model_field.attname, None)
+                    current = {str(pk)} if pk is not None else set()
+                elif current_obj := getattr(item, f_name, None):
+                    current = {str(current_obj.pk)}
+                else:
+                    current = set()
 
-            access_action = CrudAccessAction.CHANGE if field_info.reverse else CrudAccessAction.VIEW
-            allowed = rel_model.get_default_route().restrict_queryset(
-                rel_model.objects.filter(pk__in=ids),
-                access_action,
-                permit=self.inject.permit,
-            )
-            # compare the identifiers: a permission condition over a to-many relation can
-            # return an object several times
-            allowed_ids = {str(pk) for pk in allowed.values_list('pk', flat=True).distinct()}
+                if action == 'remove':
+                    # removing a to-one relation clears it whatever the request refers to
+                    ids, unlinked = set(), (ids & current if field_info.to_many else current)
+                elif action == 'add':
+                    ids -= current
+                else:
+                    ids, unlinked = ids - current, current - ids
 
-            if ids - allowed_ids:
-                raise JsonApiBazisException(
-                    JsonApiBazisError(
-                        detail=str(_('No access to the related object')),
-                        loc=('body', 'data', 'relationships', f_name),
-                        code='ERR_RELATION_ACCESS',
-                        title=str(_('Access denied')),
-                        status=403,
-                    ),
+            if field_info.reverse:
+                self._check_related_access(f_name, rel_model, ids | unlinked, CrudAccessAction.CHANGE)
+            else:
+                self._check_related_access(f_name, rel_model, ids, CrudAccessAction.VIEW)
+
+    def _check_related_access(self, f_name, rel_model, ids: set[str], access_action):
+        if not ids:
+            return
+        allowed = rel_model.get_default_route().restrict_queryset(
+            rel_model.objects.filter(pk__in=ids),
+            access_action,
+            permit=self.inject.permit,
+        )
+        # a permission condition over a to-many relation can return an object several times
+        if ids - {str(pk) for pk in allowed.values_list('pk', flat=True)}:
+            raise JsonApiBazisException(
+                JsonApiBazisError(
+                    detail=str(_('No access to the related object')),
+                    loc=('body', 'data', 'relationships', f_name),
+                    code='ERR_RELATION_ACCESS',
+                    title=str(_('Access denied')),
                     status=403,
-                )
+                ),
+                status=403,
+            )
 
     def hook_before_relationships_change(self, item, data, related_field_name, action):
         """
@@ -716,8 +731,7 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         """
         if self.inject.user.is_anonymous:
             raise JsonApi403Exception
-        if action != 'remove':
-            self.check_relations_access(data, item)
+        self.check_relations_access(data, item, action)
         super().hook_before_relationships_change(item, data, related_field_name, action)
 
     def hook_after_relationships_change(self, item, data, related_field_name, action):

@@ -31,7 +31,7 @@ BS_MEDIA_ROOT=/tmp/bazis/media BS_STATIC_ROOT=/tmp/bazis/static BS_WEBAPP_ROOT=/
 python -m pytest ../tests -o addopts="" -p no:cacheprovider
 ```
 
-Lint: `ruff check bazis tests`. CI also runs `python manage.py makemigrations --check
+Lint: `ruff check bazis tests sample`. CI also runs `python manage.py makemigrations --check
 --dry-run` in `sample`: commit the migrations of model changes, including the sample apps.
 
 ## Releasing
