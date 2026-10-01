@@ -623,20 +623,41 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         self.check_access(CrudAccessAction.DELETE, item)
         return super().destroy(item_id=item_id)
 
-    def _relation_ids(self, value) -> set[str]:
+    @staticmethod
+    def _relation_ids(value, rel_model) -> set[str]:
+        """
+        The identifiers referenced by a relationship value, normalized by the primary key
+        field of the related model (e.g. a UUID in upper case).
+        """
         rel_data = (value or {}).get('data')
         if isinstance(rel_data, list):
-            return {str(it['id']) for it in rel_data if it and it.get('id') is not None}
-        if rel_data and rel_data.get('id') is not None:
-            return {str(rel_data['id'])}
-        return set()
+            raw_ids = [it['id'] for it in rel_data if it and it.get('id') is not None]
+        elif rel_data and rel_data.get('id') is not None:
+            raw_ids = [rel_data['id']]
+        else:
+            raw_ids = []
+
+        pk_field = rel_model._meta.pk
+        try:
+            return {str(pk_field.to_python(raw_id)) for raw_id in raw_ids}
+        except ValidationError:
+            raise JsonApiBazisException(
+                JsonApiBazisError(
+                    detail=str(_('Invalid identifier of the related object')),
+                    code='ERR_RELATION_ID',
+                    title=str(_('Invalid identifier')),
+                    status=400,
+                ),
+                status=400,
+            ) from None
 
     def check_relations_access(self, data: Any, item: JsonApiMixin = None):
         """
         Checks that the objects referenced by the relationships of the item data are
-        visible to the user (the view permission of their model). For a changed item only
-        the objects that are not referenced yet are checked. Models without a permission
-        route are not checked.
+        visible to the user (the view permission of their model). A reverse relationship
+        changes the referenced objects (their foreign key), so they must be changeable
+        (the change permission). For a changed item only the objects that are not
+        referenced yet are checked. Models without a permission route are not checked.
         """
         enabled = self.relations_view_check
         if enabled is None:
@@ -654,28 +675,29 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
             if not is_model_permit(rel_model):
                 continue
 
-            ids = self._relation_ids(value)
+            ids = self._relation_ids(value, rel_model)
             if item is not None and ids:
                 if field_info.to_many:
                     current = getattr(item, f_name).values_list('pk', flat=True)
                     ids -= {str(pk) for pk in current}
-                else:
-                    ids.discard(str(getattr(item, f'{f_name}_id', None)))
+                elif not field_info.reverse:
+                    ids.discard(str(getattr(item, field_info.model_field.attname, None)))
+                elif current := getattr(item, f_name, None):
+                    ids.discard(str(current.pk))
             if not ids:
                 continue
 
-            try:
-                visible = rel_model.get_default_route().restrict_queryset(
-                    rel_model.objects.filter(pk__in=ids),
-                    CrudAccessAction.VIEW,
-                    permit=self.inject.permit,
-                )
-                visible_count = visible.count()
-            except (ValueError, ValidationError):
-                # malformed identifiers: assigning them fails anyway
-                continue
+            access_action = CrudAccessAction.CHANGE if field_info.reverse else CrudAccessAction.VIEW
+            allowed = rel_model.get_default_route().restrict_queryset(
+                rel_model.objects.filter(pk__in=ids),
+                access_action,
+                permit=self.inject.permit,
+            )
+            # compare the identifiers: a permission condition over a to-many relation can
+            # return an object several times
+            allowed_ids = {str(pk) for pk in allowed.values_list('pk', flat=True).distinct()}
 
-            if visible_count != len(ids):
+            if ids - allowed_ids:
                 raise JsonApiBazisException(
                     JsonApiBazisError(
                         detail=str(_('No access to the related object')),
@@ -686,6 +708,21 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
                     ),
                     status=403,
                 )
+
+    def hook_before_relationships_change(self, item, data, related_field_name, action):
+        """
+        The relationships endpoints: the update schema already checked the change
+        permission; the referenced objects are checked as for an update of the item.
+        """
+        if self.inject.user.is_anonymous:
+            raise JsonApi403Exception
+        if action != 'remove':
+            self.check_relations_access(data, item)
+        super().hook_before_relationships_change(item, data, related_field_name, action)
+
+    def hook_after_relationships_change(self, item, data, related_field_name, action):
+        super().hook_after_relationships_change(item, data, related_field_name, action)
+        self.check_access(CrudAccessAction.CHECK, item, item_passive=True)
 
     def item_update(self, item: JsonApiMixin, data: Any):
         """
