@@ -1,0 +1,45 @@
+# What the package is for and how to use it, for tools and AI agents (see AGENTS.md).
+# `import` paths and `check` ids are verified by tests/test_manifest.py.
+
+[package]
+name = "bazis-permit"
+summary = "permissions of users on objects, fields and relations, by roles"
+solves = [
+    "users see and change only their own or their organization's objects",
+    "roles and groups of permissions managed in the admin or the API",
+    "hide or protect fields per user",
+    "restrict which objects a relation may reference",
+]
+requires = ["bazis", "bazis-users"]
+pairs_well = ["bazis-author", "bazis-statusy"]
+
+[[extension_points]]
+name = "PermitRouteBase"
+import = "bazis.contrib.permit.routes_abstract.PermitRouteBase"
+use_when = "every route of a model protected by permissions"
+
+[[extension_points]]
+name = "PermitModelMixin"
+import = "bazis.contrib.permit.models_abstract.PermitModelMixin"
+use_when = "a model protected by permissions (selectors)"
+
+[[extension_points]]
+name = "UserPermitMixin"
+import = "bazis.contrib.permit.models_abstract.UserPermitMixin"
+use_when = "the user model: roles and the current role"
+
+[[extension_points]]
+name = "PermitSelectorMixin"
+import = "bazis.contrib.permit.models_abstract.PermitSelectorMixin"
+use_when = "a model that links objects to users (e.g. an organization) for selectors"
+
+[[pitfalls]]
+text = "BAZIS_PERMIT_RELATIONS_VIEW_CHECK is off by default: relations are not checked"
+check = "permit.W001"
+
+[[pitfalls]]
+text = "a JSON:API route that does not inherit PermitRouteBase serves its model without permissions"
+check = "permit.W002"
+
+[[pitfalls]]
+text = "QuerySet.update() and bulk_create() on roles, groups and permissions do not invalidate the permission cache"
