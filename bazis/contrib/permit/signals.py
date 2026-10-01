@@ -22,13 +22,17 @@ a renamed role), and permissions change rarely.
 """
 
 from django.apps import apps
+from django.db import transaction
 from django.db.models.signals import m2m_changed, post_delete, post_save
 
 from .schemas import perms_cache_invalidate
 
 
 def perm_cache_clean(sender, **kwargs):
+    # now, and once more after the commit: a request running in between could cache the
+    # permissions committed before the change under the new version
     perms_cache_invalidate()
+    transaction.on_commit(perms_cache_invalidate)
 
 
 def connect():

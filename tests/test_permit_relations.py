@@ -149,22 +149,27 @@ def test_relations_check_disabled_by_default(sample_app, users, settings):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_relations_check_to_many(sample_app, users):
+def test_relations_check_reverse_requires_change(sample_app, users):
     """
-    A reverse to-many relation changes the referenced objects: they must be visible too.
+    A reverse relation changes the referenced objects: attaching the dependent entity of
+    another user to an own parent entity needs the change permission on it.
     """
     owner, stranger = users
     own_parent = factories.ParentEntityFactory.create(author=stranger, child_entities=False)
-    foreign_parent = factories.ParentEntityFactory.create(author=owner, child_entities=False)
-    dependent = factories.DependentEntityFactory.create(author=stranger, parent_entity=own_parent)
+    foreign_dependent = factories.DependentEntityFactory.create(
+        author=owner, parent_entity=factories.ParentEntityFactory.create(author=owner)
+    )
+    own_dependent = factories.DependentEntityFactory.create(
+        author=stranger, parent_entity=factories.ParentEntityFactory.create(author=stranger)
+    )
     client = get_api_client(sample_app, stranger.jwt_build())
 
-    def patch(parent):
+    def patch(dependent):
         return client.patch(
-            f'/api/v1/entity/parent_entity/{parent.id}/',
+            f'/api/v1/entity/parent_entity/{own_parent.id}/',
             json_data={
                 'data': {
-                    'id': str(parent.id),
+                    'id': str(own_parent.id),
                     'type': 'entity.parent_entity',
                     'bs:action': 'change',
                     'relationships': {
@@ -176,10 +181,64 @@ def test_relations_check_to_many(sample_app, users):
             },
         )
 
-    # dependent entities are visible to everybody, the own parent can be changed
-    assert patch(own_parent).status_code == 200
-    # the foreign parent is not visible, so it cannot be changed at all
-    assert patch(foreign_parent).status_code in (403, 404)
+    # dependent entities are visible to everybody, but only their authors can change them
+    response = patch(foreign_dependent)
+    assert response.status_code == 403
+    assert response.json()['errors'][0]['code'] == 'ERR_RELATION_ACCESS'
+    foreign_dependent.refresh_from_db()
+    assert foreign_dependent.parent_entity_id != own_parent.id
+
+    assert patch(own_dependent).status_code == 200
+    own_dependent.refresh_from_db()
+    assert own_dependent.parent_entity_id == own_parent.id
+
+
+def _relationship_url(dependent) -> str:
+    return f'/api/v1/entity/dependent_entity/{dependent.id}/relationships/parent_entity'
+
+
+def _relationship_payload(parent) -> dict:
+    return {'data': {'id': str(parent.id), 'type': 'entity.parent_entity'}}
+
+
+@pytest.mark.django_db(transaction=True)
+def test_relationships_endpoint_checks_relations(sample_app, users):
+    owner, stranger = users
+    foreign_parent = factories.ParentEntityFactory.create(author=owner, child_entities=False)
+    own_parent = factories.ParentEntityFactory.create(author=stranger, child_entities=False)
+    dependent = factories.DependentEntityFactory.create(author=stranger, parent_entity=own_parent)
+    client = get_api_client(sample_app, stranger.jwt_build())
+
+    response = client.patch(_relationship_url(dependent), json_data=_relationship_payload(foreign_parent))
+    assert response.status_code == 403
+    dependent.refresh_from_db()
+    assert dependent.parent_entity_id == own_parent.id
+
+    other_parent = factories.ParentEntityFactory.create(author=stranger, child_entities=False)
+    response = client.patch(_relationship_url(dependent), json_data=_relationship_payload(other_parent))
+    assert response.status_code == 204
+    dependent.refresh_from_db()
+    assert dependent.parent_entity_id == other_parent.id
+
+
+@pytest.mark.django_db(transaction=True)
+def test_relationships_endpoint_requires_change(sample_app, users, settings):
+    """
+    The relationships endpoints changed relations of any object, without permissions.
+    """
+    settings.BAZIS_PERMIT_RELATIONS_VIEW_CHECK = False
+    owner, stranger = users
+    parent = factories.ParentEntityFactory.create(author=owner, child_entities=False)
+    foreign_dependent = factories.DependentEntityFactory.create(author=owner, parent_entity=parent)
+    own_parent = factories.ParentEntityFactory.create(author=stranger, child_entities=False)
+
+    for client in (get_api_client(sample_app, stranger.jwt_build()), get_api_client(sample_app)):
+        response = client.patch(
+            _relationship_url(foreign_dependent), json_data=_relationship_payload(own_parent)
+        )
+        assert response.status_code in (401, 403)
+    foreign_dependent.refresh_from_db()
+    assert foreign_dependent.parent_entity_id == parent.id
 
 
 @pytest.mark.django_db(transaction=True)
