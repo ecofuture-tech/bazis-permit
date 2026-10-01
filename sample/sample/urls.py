@@ -14,12 +14,11 @@
 
 from django.conf import settings
 from django.contrib import admin
-from django.urls import include, path, re_path
+from django.urls import path, re_path
 from django.views.static import serve
 
 
 urlpatterns = [
-    path('admin/permit/', include('bazis.contrib.permit.urls')),
     path('admin/', admin.site.urls),
 ]
 

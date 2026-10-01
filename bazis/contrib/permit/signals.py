@@ -12,20 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+Invalidation of the cached permissions of the roles (see `PermitService.perms`).
+
+The cache keys of all roles contain a common version, which any change of roles,
+permission groups, permissions or their relations replaces: a change can affect any number
+of roles in ways that are hard to follow (a reverse many-to-many change, a deleted group,
+a renamed role), and permissions change rarely.
+"""
+
 from django.apps import apps
-from django.core.cache import cache
-from django.db.models.signals import m2m_changed
-from django.dispatch import receiver
+from django.db.models.signals import m2m_changed, post_delete, post_save
 
-from .schemas import PERMS_CACHE_PREFIX
+from .schemas import perms_cache_invalidate
 
 
-@receiver(m2m_changed)
-def perm_cache_clean(sender, instance, action, reverse, pk_set, *args, **kwargs):
+def perm_cache_clean(sender, **kwargs):
+    perms_cache_invalidate()
+
+
+def connect():
     Role = apps.get_model('permit.Role')  # noqa: N806
-    GroupPermission = apps.get_model('permit.GroupPermission') # noqa: N806
-    if sender == Role.groups_permission.through:
-        cache.delete(f'{PERMS_CACHE_PREFIX}{instance.slug}')
-    elif sender == GroupPermission.permissions.through:
-        for role in Role.objects.filter(groups_permission=instance):
-            cache.delete(f'{PERMS_CACHE_PREFIX}{role.slug}')
+    GroupPermission = apps.get_model('permit.GroupPermission')  # noqa: N806
+    Permission = apps.get_model('permit.Permission')  # noqa: N806
+
+    for through in (Role.groups_permission.through, GroupPermission.permissions.through):
+        m2m_changed.connect(perm_cache_clean, sender=through, dispatch_uid=f'permit_{through}')
+    for model in (Role, GroupPermission, Permission):
+        for signal in (post_save, post_delete):
+            signal.connect(perm_cache_clean, sender=model, dispatch_uid=f'permit_{signal}_{model}')

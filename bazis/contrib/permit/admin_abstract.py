@@ -19,7 +19,7 @@ from django.contrib import admin
 from django.contrib.admin.views.autocomplete import AutocompleteJsonView
 from django.contrib.admin.widgets import AutocompleteMixin as AutocompleteMixinDjango
 from django.urls import re_path, reverse
-from django.utils.html import mark_safe
+from django.utils.html import format_html_join, mark_safe
 from django.utils.text import capfirst
 from django.utils.translation import gettext_lazy as _
 
@@ -66,7 +66,7 @@ class UserPermitAdminMixin:
         a user, separated by line breaks. This method is used in the admin interface to
         show user roles.
         """
-        return mark_safe('<br/>'.join([role.name for role in user.roles.all()]))
+        return format_html_join(mark_safe('<br/>'), '{}', ((role.name,) for role in user.roles.all()))
 
 
 class RoleAdminBase(M2mThroughMixin, DtAdminMixin, TranslatedFieldAdmin, admin.ModelAdmin):

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import enum
+import uuid
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
@@ -30,6 +31,29 @@ def ATTR_SELECTORS(x):  # noqa: N802
 
 ANONYMOUS_ID = 'anon'
 PERMS_CACHE_PREFIX = 'users_perms::'
+PERMS_CACHE_VERSION_KEY = 'users_perms_version'
+
+
+def perms_cache_version() -> str:
+    """
+    Returns the current version of the cached permissions of the roles.
+    """
+    from django.core.cache import cache
+
+    return cache.get_or_set(PERMS_CACHE_VERSION_KEY, lambda: uuid.uuid4().hex, timeout=None)
+
+
+def perms_cache_invalidate():
+    """
+    Invalidates the cached permissions of all roles.
+    """
+    from django.core.cache import cache
+
+    cache.set(PERMS_CACHE_VERSION_KEY, uuid.uuid4().hex, timeout=None)
+
+
+def perms_cache_key(role_slug: str) -> str:
+    return f'{PERMS_CACHE_PREFIX}{perms_cache_version()}:{role_slug}'
 PERM_ALL = 'all'
 PERM_SELF = 'self'
 

@@ -34,7 +34,9 @@ class PermitConfig(BaseConfig):
         """
         super().ready()
 
-        from . import signals  # noqa: F401
+        from . import signals
+
+        signals.connect()
         from .models_abstract import PermitModelMixin
 
         PermitModelMixin.setup_selectors_fields()
