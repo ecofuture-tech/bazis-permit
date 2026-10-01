@@ -28,6 +28,10 @@ class Settings(BazisSettings):
     BAZIS_PERMISSION_CACHE_EXPIRE: int = Field(
         7, title=_('Time to store user permissions, sec'), dynamic=True
     )
+    BAZIS_PERMIT_RELATIONS_VIEW_CHECK: bool = Field(
+        False,
+        title=_('Created and changed items can reference only the objects the user can view'),
+    )
 
 
 settings = Settings()
