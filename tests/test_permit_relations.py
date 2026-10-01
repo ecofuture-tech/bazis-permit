@@ -377,10 +377,16 @@ def test_relationships_endpoint_filter_restricts_unlinking(sample_app):
     def delete(*children):
         return client.client.request('DELETE', url, json=payload(*children), headers=client.headers)
 
-    assert client.post(url, json_data=payload(active)).status_code == 204
+    # an identifier in another spelling (a UUID in upper case) is the same object
+    upper = {'data': [{'id': str(active.id).upper(), 'type': 'entity.child_entity'}]}
+    assert client.post(url, json_data=upper).status_code == 204
     assert delete(inactive).status_code == 403
     assert client.patch(url, json_data=payload(active)).status_code == 403
     assert set(parent.child_entities.all()) == {inactive, active}
+
+    invalid = {'data': [{'id': 'not-a-uuid', 'type': 'entity.child_entity'}]}
+    response = client.client.request('DELETE', url, json=invalid, headers=client.headers)
+    assert response.status_code == 400
 
     assert delete(active).status_code == 204
     assert set(parent.child_entities.all()) == {inactive}

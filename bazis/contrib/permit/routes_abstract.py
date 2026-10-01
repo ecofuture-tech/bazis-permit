@@ -691,7 +691,8 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
                     current = set()
 
                 if action == 'remove':
-                    ids, unlinked = set(), ids & current
+                    # removing a to-one relation clears it whatever the request refers to
+                    ids, unlinked = set(), (ids & current if field_info.to_many else current)
                 elif action == 'add':
                     ids -= current
                 else:
