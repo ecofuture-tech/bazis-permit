@@ -42,9 +42,12 @@ jobs:
             echo "::error::Tag v$VERSION already exists"
             exit 1
           fi
-          LAST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
+          # versionsort.suffix: a pre-release (v2.4.0-rc1) sorts before its release (v2.4.0)
+          LAST_TAG=$(git -c versionsort.suffix=- tag --list 'v*' --sort=-v:refname | head -n 1)
           echo "Last release: ${LAST_TAG:-none}, new release: v$VERSION"
-          if [ -n "$LAST_TAG" ] && [ "$(printf '%s\n%s\n' "${LAST_TAG#v}" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ]; then
+          # sort -V orders "~" before anything, as versionsort.suffix does with "-"
+          NEWEST=$(printf '%s\n%s\n' "${LAST_TAG#v}" "$VERSION" | sed 's/-/~/' | sort -V | tail -n 1)
+          if [ -n "$LAST_TAG" ] && [ "$NEWEST" != "${VERSION/-/\~}" ]; then
             echo "::error::Version $VERSION is not newer than $LAST_TAG"
             exit 1
           fi
