@@ -26,7 +26,7 @@ class Settings(BazisSettings):
     """
 
     BAZIS_PERMISSION_CACHE_EXPIRE: int = Field(
-        7, title=_('Time to store user permissions, sec'), dynamic=True
+        7, title=_('Time to store user permissions, sec'), json_schema_extra={'dynamic': True}
     )
     BAZIS_PERMIT_RELATIONS_VIEW_CHECK: bool = Field(
         False,
