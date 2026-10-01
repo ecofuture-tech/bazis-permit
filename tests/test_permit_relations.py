@@ -19,6 +19,7 @@ records to objects of other users (e.g. a dependent entity to a foreign parent e
 
 import pytest
 from bazis_test_utils.utils import get_api_client
+from entity.models import DependentEntity
 from translated_fields import to_attribute
 
 from bazis.contrib.permit.models import GroupPermission, Permission, Role
@@ -156,6 +157,7 @@ def test_relations_check_reverse_requires_change(sample_app, users):
     """
     owner, stranger = users
     own_parent = factories.ParentEntityFactory.create(author=stranger, child_entities=False)
+    own_parent.dependent_entities.all().delete()
     foreign_dependent = factories.DependentEntityFactory.create(
         author=owner, parent_entity=factories.ParentEntityFactory.create(author=owner)
     )
@@ -191,6 +193,51 @@ def test_relations_check_reverse_requires_change(sample_app, users):
     assert patch(own_dependent).status_code == 200
     own_dependent.refresh_from_db()
     assert own_dependent.parent_entity_id == own_parent.id
+
+
+
+@pytest.mark.django_db(transaction=True)
+def test_relations_check_reverse_unlinked_requires_change(sample_app, users):
+    """
+    Leaving an object out of a reverse relation unlinks it (here deletes it: its foreign
+    key is required), so it needs the change permission too.
+    """
+    owner, stranger = users
+    own_parent = factories.ParentEntityFactory.create(author=stranger, child_entities=False)
+    own_parent.dependent_entities.all().delete()
+    foreign_dependent = factories.DependentEntityFactory.create(author=owner, parent_entity=own_parent)
+    own_dependent = factories.DependentEntityFactory.create(author=stranger, parent_entity=own_parent)
+    client = get_api_client(sample_app, stranger.jwt_build())
+
+    def patch(dependents):
+        return client.patch(
+            f'/api/v1/entity/parent_entity/{own_parent.id}/',
+            json_data={
+                'data': {
+                    'id': str(own_parent.id),
+                    'type': 'entity.parent_entity',
+                    'bs:action': 'change',
+                    'relationships': {
+                        'dependent_entities': {
+                            'data': [
+                                {'id': str(it.id), 'type': 'entity.dependent_entity'}
+                                for it in dependents
+                            ]
+                        },
+                    },
+                },
+            },
+        )
+
+    response = patch([])
+    assert response.status_code == 403
+    assert response.json()['errors'][0]['code'] == 'ERR_RELATION_ACCESS'
+    assert DependentEntity.objects.filter(id=foreign_dependent.id).exists()
+    assert DependentEntity.objects.filter(id=own_dependent.id).exists()
+
+    assert patch([foreign_dependent]).status_code == 200
+    assert DependentEntity.objects.filter(id=foreign_dependent.id).exists()
+    assert not DependentEntity.objects.filter(id=own_dependent.id).exists()
 
 
 def _relationship_url(dependent) -> str:
@@ -294,3 +341,52 @@ def test_permissions_cache_invalidation():
     # a deleted group
     group.delete()
     assert perms() == {}
+
+
+@pytest.mark.django_db(transaction=True)
+def test_relationships_endpoint_filter_restricts_unlinking(sample_app):
+    """
+    A `filter:` field permission restricts the objects a relation may reference. The
+    relationships endpoints checked it only for the added objects: DELETE and PATCH
+    unlinked the objects the user may not touch.
+    """
+    group = GroupPermission.objects.create(slug='children', **{to_attribute('name'): 'children'})
+    for slug in (
+        'entity.parent_entity.item.view.author',
+        'entity.parent_entity.item.change.author',
+        'entity.parent_entity.field.change.all.child_entities.filter:child_is_active=true',
+        'entity.child_entity.item.view.all',
+    ):
+        group.permissions.add(Permission.objects.get_or_create(slug=slug)[0])
+    role = Role.objects.create(slug='role_children', **{to_attribute('name'): 'children'})
+    role.groups_permission.add(group)
+    user = User.objects.create_user('children', password='weak_password_3')
+    user.roles.add(role)
+
+    parent = factories.ParentEntityFactory.create(author=user, child_entities=False)
+    inactive = factories.ChildEntityFactory.create(child_is_active=False)
+    active = factories.ChildEntityFactory.create(child_is_active=True)
+    parent.child_entities.add(inactive)
+
+    client = get_api_client(sample_app, user.jwt_build())
+    url = f'/api/v1/entity/parent_entity/{parent.id}/relationships/child_entities'
+
+    def payload(*children):
+        return {'data': [{'id': str(it.id), 'type': 'entity.child_entity'} for it in children]}
+
+    def delete(*children):
+        return client.client.request('DELETE', url, json=payload(*children), headers=client.headers)
+
+    # an identifier in another spelling (a UUID in upper case) is the same object
+    upper = {'data': [{'id': str(active.id).upper(), 'type': 'entity.child_entity'}]}
+    assert client.post(url, json_data=upper).status_code == 204
+    assert delete(inactive).status_code == 403
+    assert client.patch(url, json_data=payload(active)).status_code == 403
+    assert set(parent.child_entities.all()) == {inactive, active}
+
+    invalid = {'data': [{'id': 'not-a-uuid', 'type': 'entity.child_entity'}]}
+    response = client.client.request('DELETE', url, json=invalid, headers=client.headers)
+    assert response.status_code == 400
+
+    assert delete(active).status_code == 204
+    assert set(parent.child_entities.all()) == {inactive}
