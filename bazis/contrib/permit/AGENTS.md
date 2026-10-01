@@ -31,10 +31,18 @@ selector other than `all`.
 ## Setup
 
 ```python
-from bazis.contrib.permit.models_abstract import PermitModelMixin, UserPermitMixin
+from bazis.contrib.permit.models_abstract import (
+    AnonymousUserPermitMixin, PermitModelMixin, PermitSelectorMixin, UserPermitMixin,
+)
 from bazis.contrib.permit.routes_abstract import PermitRouteBase
 
-class User(UserPermitMixin, UserAbstract, DtMixin, UuidMixin, JsonApiMixin): ...
+# users/models.py: the user is the source of the `author` selector (PermitSelectorMixin),
+# the anonymous user gets the roles for anonymous users
+class User(UserPermitMixin, PermitSelectorMixin, UuidMixin, UserAbstract, JsonApiMixin):
+    pass
+
+class AnonymousUser(AnonymousUserPermitMixin, AnonymousUserAbstract):
+    pass
 
 class Document(PermitModelMixin, AuthorMixin, DtMixin, UuidMixin, JsonApiMixin):
     autogen_selectors_fields = ['author']    # selector fields with GIN indexes
@@ -49,6 +57,10 @@ class DocumentRouteSet(PermitRouteBase):
 - `PermitRouteBase` filters the querysets, hides fields, builds the schemas per user, checks
   every CRUD action and the relationships endpoints, and adds the meta fields
   `for_change`, `for_delete`, `for_create`, `crud_actions`.
+- Anonymous users can only read (create, update and delete are 403), within the roles
+  marked `for_anonymous`.
+- Selector fields are generated only for foreign keys to `PermitSelectorMixin` models
+  (the user, an organization...); `autogen_selectors_fields` lists them.
 - In custom actions check explicitly: `self.check_access(CrudAccessAction.VIEW, item)`.
 
 ## Rules
