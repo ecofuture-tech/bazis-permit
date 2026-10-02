@@ -16,6 +16,7 @@ from collections.abc import Iterable
 from functools import reduce
 
 from django.apps import apps
+from django.conf import settings
 from django.contrib.gis.db import models
 from django.contrib.postgres.fields import ArrayField
 from django.contrib.postgres.indexes import GinIndex
@@ -34,6 +35,19 @@ from bazis.core.utils.query_complex import QueryComplex, QueryComplexItem, Query
 
 from .schemas import ATTR_SELECTORS, PermitStructMixin, SelectorField
 from .triggers import TriggerRoleCurrentInRoles, TriggerSetDefaultUserRole
+
+
+def translated_languages(*languages: str) -> list[str]:
+    """
+    The languages of the translated fields of the package: its migrations have exactly
+    these columns, whatever the languages of the project. In the order of the project's
+    languages: the first one is the fallback.
+    """
+    project = [code for code, _name in settings.LANGUAGES]
+    return sorted(languages, key=lambda code: project.index(code) if code in project else len(project))
+
+
+LANGUAGES = translated_languages('en', 'ru')
 
 
 class PermitModelMixin(UserMixin, PermitStructMixin):
@@ -361,7 +375,9 @@ class BaseGroup(BasePermission):
     Abstract base model for groups, extending BasePermission with additional fields.
     """
 
-    name = TranslatedFieldWithFallback(models.CharField(_('Name'), max_length=255, blank=True, default=''))
+    name = TranslatedFieldWithFallback(
+        models.CharField(_('Name'), max_length=255, blank=True, default=''), languages=LANGUAGES
+    )
 
     class Meta:
         """
