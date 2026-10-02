@@ -16,15 +16,17 @@ from collections.abc import Iterable
 from functools import reduce
 
 from django.apps import apps
+from django.conf import settings
 from django.contrib.gis.db import models
 from django.contrib.postgres.fields import ArrayField
 from django.contrib.postgres.indexes import GinIndex
 from django.db.models import BooleanField, Case, QuerySet, Value, When
 from django.db.models.constants import LOOKUP_SEP
 from django.utils.functional import cached_property
+from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 
-from translated_fields import TranslatedFieldWithFallback
+from translated_fields import TranslatedFieldWithFallback, to_attribute
 
 from bazis.contrib.users.models_abstract import UserMixin
 from bazis.core.models_abstract import DtMixin, InitialBase, JsonApiMixin, UuidMixin
@@ -34,6 +36,41 @@ from bazis.core.utils.query_complex import QueryComplex, QueryComplexItem, Query
 
 from .schemas import ATTR_SELECTORS, PermitStructMixin, SelectorField
 from .triggers import TriggerRoleCurrentInRoles, TriggerSetDefaultUserRole
+
+
+def translated_languages(*languages: str) -> list[str]:
+    """
+    The languages of the translated fields of the package: its migrations have exactly
+    these columns, whatever the languages of the project. In the order of the project's
+    languages: the first one is the fallback.
+    """
+    project = [code for code, _name in settings.LANGUAGES]
+    return sorted(languages, key=lambda code: project.index(code) if code in project else len(project))
+
+
+LANGUAGES = translated_languages('en', 'ru')
+
+
+def translated_column(name: str, languages: list[str], language: str | None = None) -> str:
+    """
+    The column of a translated field in a language (the current one by default): the
+    language, its base language (`en` of `en-us`) or the fallback language, the first one
+    the field has a column for.
+    """
+    language = (language or get_language() or '').lower()
+    for code in (language, language.split('-')[0]):
+        if code in languages:
+            return to_attribute(name, code)
+    return to_attribute(name, languages[0])
+
+
+def translated_attrsetter(name, field):
+    """
+    Sets the value of the current language, or of the fallback language when the field has
+    no column for it (the setter of translated_fields would set an attribute that is not
+    saved).
+    """
+    return lambda self, value: setattr(self, translated_column(name, field.languages), value)
 
 
 class PermitModelMixin(UserMixin, PermitStructMixin):
@@ -361,7 +398,11 @@ class BaseGroup(BasePermission):
     Abstract base model for groups, extending BasePermission with additional fields.
     """
 
-    name = TranslatedFieldWithFallback(models.CharField(_('Name'), max_length=255, blank=True, default=''))
+    name = TranslatedFieldWithFallback(
+        models.CharField(_('Name'), max_length=255, blank=True, default=''),
+        languages=LANGUAGES,
+        attrsetter=translated_attrsetter,
+    )
 
     class Meta:
         """
