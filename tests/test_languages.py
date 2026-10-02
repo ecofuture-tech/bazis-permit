@@ -46,3 +46,26 @@ def test_the_languages_follow_the_order_of_the_project(settings):
     assert translated_languages('en', 'ru') == ['ru', 'en']
     settings.LANGUAGES = [('de', 'German')]
     assert translated_languages('en', 'ru') == ['en', 'ru']
+
+
+def test_a_language_without_a_column():
+    """
+    In a language the field has no column for, the name is read and written in the
+    fallback language (it was set as an attribute that is not saved).
+    """
+    from django.utils import translation
+
+    from bazis.contrib.permit.models import Role
+    from bazis.contrib.permit.models_abstract import LANGUAGES, translated_column
+
+    fallback = f'name_{LANGUAGES[0]}'
+    role = Role()
+    with translation.override('de'):
+        role.name = 'Admin'
+        assert role.name == 'Admin'
+    assert getattr(role, fallback) == 'Admin'
+    assert 'name_de' not in vars(role)
+
+    assert translated_column('name', ['en', 'ru'], 'en-us') == 'name_en'
+    assert translated_column('name', ['en', 'ru'], 'ru') == 'name_ru'
+    assert translated_column('name', ['en', 'ru'], 'de') == 'name_en'

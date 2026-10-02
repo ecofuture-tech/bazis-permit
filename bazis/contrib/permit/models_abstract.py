@@ -23,9 +23,10 @@ from django.contrib.postgres.indexes import GinIndex
 from django.db.models import BooleanField, Case, QuerySet, Value, When
 from django.db.models.constants import LOOKUP_SEP
 from django.utils.functional import cached_property
+from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 
-from translated_fields import TranslatedFieldWithFallback
+from translated_fields import TranslatedFieldWithFallback, to_attribute
 
 from bazis.contrib.users.models_abstract import UserMixin
 from bazis.core.models_abstract import DtMixin, InitialBase, JsonApiMixin, UuidMixin
@@ -48,6 +49,28 @@ def translated_languages(*languages: str) -> list[str]:
 
 
 LANGUAGES = translated_languages('en', 'ru')
+
+
+def translated_column(name: str, languages: list[str], language: str | None = None) -> str:
+    """
+    The column of a translated field in a language (the current one by default): the
+    language, its base language (`en` of `en-us`) or the fallback language, the first one
+    the field has a column for.
+    """
+    language = (language or get_language() or '').lower()
+    for code in (language, language.split('-')[0]):
+        if code in languages:
+            return to_attribute(name, code)
+    return to_attribute(name, languages[0])
+
+
+def translated_attrsetter(name, field):
+    """
+    Sets the value of the current language, or of the fallback language when the field has
+    no column for it (the setter of translated_fields would set an attribute that is not
+    saved).
+    """
+    return lambda self, value: setattr(self, translated_column(name, field.languages), value)
 
 
 class PermitModelMixin(UserMixin, PermitStructMixin):
@@ -376,7 +399,9 @@ class BaseGroup(BasePermission):
     """
 
     name = TranslatedFieldWithFallback(
-        models.CharField(_('Name'), max_length=255, blank=True, default=''), languages=LANGUAGES
+        models.CharField(_('Name'), max_length=255, blank=True, default=''),
+        languages=LANGUAGES,
+        attrsetter=translated_attrsetter,
     )
 
     class Meta:
