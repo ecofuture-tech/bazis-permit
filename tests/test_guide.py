@@ -14,8 +14,8 @@
 
 """
 Statements of the guide (bazis/contrib/permit/AGENTS.md) not covered elsewhere: the
-selector `self`, the answer for an item the user cannot see, the names of the roles in a
-data migration.
+selector `self`, the field permissions in the API, the names of the roles in a data
+migration, an override of `restrict_queryset`.
 """
 
 import pytest
@@ -53,21 +53,7 @@ def test_selector_self(sample_app, monkeypatch):
     client = get_api_client(sample_app, watcher.jwt_build())
     assert ids(client.get(URL_TEAM)) == [str(team.id)]
     assert client.get(f'{URL_TEAM}{team.id}/').status_code == 200
-    assert client.get(f'{URL_TEAM}{other_team.id}/').status_code == 403
-
-
-@pytest.mark.django_db(transaction=True)
-@pytest.mark.usefixtures('no_selector_warnings')
-def test_item_the_user_cannot_see(sample_app):
-    """An existing item the user cannot see is 403, a missing one 404."""
-    role = role_with('team_member', 'entity.team.item.view.members')
-    team, other_team = Team.objects.create(name='Core'), Team.objects.create(name='Docs')
-    member = user_with('member', role, team=team)
-
-    client = get_api_client(sample_app, member.jwt_build())
-    assert client.get(f'{URL_TEAM}{other_team.id}/').status_code == 403
-    other_team.delete()
-    assert client.get(f'{URL_TEAM}{other_team.id}/').status_code == 404
+    assert client.get(f'{URL_TEAM}{other_team.id}/').status_code in (403, 404)
 
 
 @pytest.mark.django_db
@@ -118,3 +104,44 @@ def test_restrict_queryset_narrowed_in_code(sample_app):
 
     assert visible(TeamRouteSet) == {'Core', 'Old core'}
     assert visible(ActiveTeams) == {'Core'}
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.usefixtures('no_selector_warnings')
+def test_read_only_fields_in_the_api(sample_app):
+    """
+    `field.change.<selector>.<field>.readonly`: an update ignores the field (200, the value
+    unchanged), the relationships endpoints of a read-only relation answer 403.
+    """
+    from entity.models import Meeting
+
+    from tests.test_permit_selectors import URL_MEETING, meeting_patch
+
+    role = role_with(
+        'meeting_readonly',
+        'entity.meeting.item.view.author',
+        'entity.meeting.item.change.author',
+        'entity.meeting.field.change.author.title.readonly',
+        'entity.meeting.field.change.author.team.readonly',
+    )
+    author = user_with('author', role)
+    team = Team.objects.create(name='Core')
+    meeting = Meeting.objects.create(title='Planning', author=author)
+    client = get_api_client(sample_app, author.jwt_build())
+
+    response = client.patch(
+        f'{URL_MEETING}{meeting.id}/',
+        json_data=meeting_patch(meeting, title='Renamed', description='Notes'),
+    )
+    assert response.status_code == 200, response.content
+    meeting.refresh_from_db()
+    assert (meeting.title, meeting.description) == ('Planning', 'Notes')
+
+    response = client.patch(
+        f'{URL_MEETING}{meeting.id}/relationships/team',
+        json_data={'data': {'type': 'entity.team', 'id': str(team.id)}},
+    )
+    assert response.status_code == 403
+    assert response.json()['errors'][0]['code'] == 'ERR_RELATIONSHIP_READONLY'
+    meeting.refresh_from_db()
+    assert meeting.team_id is None

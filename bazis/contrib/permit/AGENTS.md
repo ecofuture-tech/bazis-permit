@@ -25,8 +25,10 @@ entity.parent.field.change.all.children.filter:is_active=true  # relation may re
 - level `item` (objects) or `field` (fields of objects);
 - operations `add`, `view`, `change`, `delete`, `check` (verified on the saved item, after
   triggers filled its selectors) and custom ones;
-- selector `all`, `self` (the object is the one its model gives the user as a selector
-  source: the user himself on a user model, `users.user.item.change.self`), `author`
+- selector `all`, `self` (on a model that is itself a `PermitSelectorMixin`: the object
+  is the one its `get_selector_for_user(user)` gives, the user himself on a user model,
+  `users.user.item.change.self`; known defect being fixed: a source that returns a list
+  matches nothing with `self`), `author`
   (bazis-author) or a relation linking the object to the user or his selector source
   (`org_owner`: a model that inherits `PermitSelectorMixin` and implements the classmethod
   `get_selector_for_user(user)`, returning an object or a list): a foreign key,
@@ -92,7 +94,6 @@ class DocumentRouteSet(PermitRouteBase):
   marks it `readOnly: true` in `schema_update` of the item (the attributes schema in
   `$defs`), an update ignores it (200, the value unchanged) and its relationships
   endpoints answer 403 `ERR_RELATIONSHIP_READONLY`.
-- An item that exists but that the user cannot see is 403, a missing one 404.
 - The users: the routes of bazis-users do not check permissions (`permit.W002` lists
   them). To restrict them, the user model also inherits `PermitModelMixin` (else
   `permit.W003`) and the project registers its own route set of it, a `PermitRouteBase`
