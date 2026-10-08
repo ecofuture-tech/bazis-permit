@@ -483,6 +483,32 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         ):
             raise JsonApi403Exception()
 
+    @classmethod
+    def permit_service_for(cls, user: User | AnonymousUser | None) -> PermitService:
+        """
+        The permission service of the user for a call on the class: the core calls
+        `restrict_queryset` once per relationship of an item, and a new service would load
+        the role and the permissions every time. Within a request (`JsonApiMixin.CTX_ROUTE`)
+        it is the service of the route of the request if that route has the same user,
+        otherwise one kept on that route for the rest of the request.
+        """
+        service_cls = [f for f in dataclasses.fields(cls.InjectPermit) if f.name == 'permit'][0].type
+        if (route := JsonApiMixin.CTX_ROUTE.get()) is None:
+            return service_cls(user)
+
+        def user_key(it):
+            return None if it is None or it.is_anonymous else it.pk
+
+        key = (service_cls, user_key(user))
+        if isinstance(route, PermitRouteBase):
+            permit = route.inject.permit
+            if (type(permit), user_key(permit.user)) == key:
+                return permit
+        services = vars(route).setdefault('_permit_services', {})
+        if key not in services:
+            services[key] = service_cls(user)
+        return services[key]
+
     @class_or_instance_method
     def restrict_queryset(
         self: type[Self] | Self,
@@ -498,7 +524,8 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         routes, with the user of the calling route (None if that route has no user): then
         the authenticated user of the request (`UserMixin.CTX_USER_REQUEST`) is used, and
         without one the roles for anonymous users. It never fails for a missing user: a
-        user without the roles of bazis-permit sees nothing.
+        user without the roles of bazis-permit sees nothing. The calls of a request share
+        the permission service of the user (`permit_service_for`).
                 :return: The restricted queryset.
         """
         if not permit:
@@ -507,9 +534,7 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
             else:
                 if user is None:
                     user = UserMixin.CTX_USER_REQUEST.get()
-                permit = [
-                    f for f in dataclasses.fields(self.InjectPermit) if f.name == 'permit'
-                ][0].type(user)
+                permit = self.permit_service_for(user)
                 # e.g. an anonymous user model without AnonymousUserPermitMixin
                 if not hasattr(permit.user, 'role_current'):
                     return qs.none()

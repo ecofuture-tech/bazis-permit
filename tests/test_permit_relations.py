@@ -572,3 +572,80 @@ def test_anonymous_user_model_without_roles(sample_app, monkeypatch):
     response = get_api_client(sample_app).get(f'/api/v1/entity/bookmark/{bookmark.id}/?include=parent_entity')
     assert response.status_code == 200
     assert response.json().get('included', []) == []
+
+
+@pytest.fixture
+def permit_usage(monkeypatch):
+    """
+    Counts the permission services created and the queries of the roles (the role of an
+    anonymous user is loaded by each new service), in every thread (the test client runs
+    the application in its own thread).
+    """
+    from django.db.backends import utils
+
+    from bazis.contrib.permit.services import PermitService
+
+    usage = {'services': 0, 'role_queries': 0}
+    init, execute = PermitService.__init__, utils.CursorWrapper.execute
+
+    def counting_init(self, *args, **kwargs):
+        usage['services'] += 1
+        init(self, *args, **kwargs)
+
+    def counting_execute(self, sql, *args, **kwargs):
+        if 'FROM "permit_role" ' in sql:
+            usage['role_queries'] += 1
+        return execute(self, sql, *args, **kwargs)
+
+    monkeypatch.setattr(PermitService, '__init__', counting_init)
+    monkeypatch.setattr(utils.CursorWrapper, 'execute', counting_execute)
+
+    def measure(request):
+        usage.update(services=0, role_queries=0)
+        response = request()
+        assert response.status_code == 200, response.text
+        return dict(usage), response.json()
+
+    return measure
+
+
+@pytest.mark.django_db(transaction=True)
+def test_included_relations_share_the_permissions(sample_app, users, permit_usage):
+    """
+    The core calls `restrict_queryset` on the class for every included relationship: the
+    calls of a request share one permission service of the user, so the permissions and
+    the roles are not loaded again for each relationship.
+    """
+    from entity.models import Bookmark
+
+    owner, __ = users
+    _anonymous_role('entity.parent_entity.item.view.all', 'entity.dependent_entity.item.view.all')
+    parent = factories.ParentEntityFactory.create(author=owner, child_entities=False)
+    parent.dependent_entities.all().delete()
+    dependent = factories.DependentEntityFactory.create(author=owner, parent_entity=parent)
+    bookmark = Bookmark.objects.create(parent_entity=parent, dependent_entity=dependent)
+
+    # an anonymous user on a route without a user
+    anonymous = get_api_client(sample_app)
+    url = f'/api/v1/entity/bookmark/{bookmark.id}/'
+    # load the permissions of the role into the cache
+    permit_usage(lambda: anonymous.get(url, params={'include': 'parent_entity'}))
+    one, data = permit_usage(lambda: anonymous.get(url, params={'include': 'parent_entity'}))
+    assert len(data['included']) == 1
+    two, data = permit_usage(
+        lambda: anonymous.get(url, params={'include': 'parent_entity,dependent_entity'})
+    )
+    assert len(data['included']) == 2
+    assert two == one
+    assert one['role_queries'] == 1
+
+    # the owner on a permission route
+    client = get_api_client(sample_app, owner.jwt_build())
+    url = f'/api/v1/entity/dependent_entity/{dependent.id}/'
+    one, data = permit_usage(lambda: client.get(url, params={'include': 'parent_entity'}))
+    assert len(data['included']) == 1
+    url = f'/api/v1/entity/parent_entity/{parent.id}/'
+    none, __ = permit_usage(lambda: client.get(url))
+    some, data = permit_usage(lambda: client.get(url, params={'include': 'dependent_entities'}))
+    assert len(data['included']) == 1
+    assert some == none
