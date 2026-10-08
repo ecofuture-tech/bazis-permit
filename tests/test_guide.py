@@ -143,8 +143,7 @@ def test_read_only_fields_in_the_api(sample_app):
     assert (meeting.title, meeting.description) == ('Planning', 'Notes')
 
     if BAZIS_VERSION < (2, 8, 1):
-        # bazis < 2.8.1 failed with 500 (KeyError) on a read-only relationship
-        return
+        pytest.skip('bazis < 2.8.1 answers 500 (KeyError) on a read-only relationship')
     response = client.patch(
         f'{URL_MEETING}{meeting.id}/relationships/team',
         json_data={'data': {'type': 'entity.team', 'id': str(team.id)}},
