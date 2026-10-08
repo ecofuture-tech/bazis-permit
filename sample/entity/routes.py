@@ -74,10 +74,14 @@ class ParentEntityRouteSet(PermitRouteBase, AuthorRouteBase):
 
 class TeamRouteSet(PermitRouteBase):
     """
-    Defines routing for the Team model.
+    Defines routing for the Team model, with its meetings (a filter through a relation).
     """
 
     model = apps.get_model('entity.Team')
+
+    fields = {
+        None: SchemaFields(include={'meetings': None}),
+    }
 
 
 class MeetingRouteSet(PermitRouteBase, AuthorRouteBase):
@@ -86,6 +90,7 @@ class MeetingRouteSet(PermitRouteBase, AuthorRouteBase):
     """
 
     model = apps.get_model('entity.Meeting')
+    search_fields = ['title', 'description']
 
 
 class BookmarkRouteSet(JsonapiRouteBase):

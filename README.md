@@ -309,6 +309,18 @@ Three tools restrict the objects an item references through its relationships:
   point (also by triggers): `entity.extended_entity.item.check.author_parent` allows creating
   and changing extended entities only for the author of the parent entity.
 - **`filter:` field permissions** restrict the objects a relation can reference (see above).
+- **Filter, sorting and search** (Bazis 2.9, `BAZIS_FILTERS_STRICT`): the `filter`, `sort`
+  and `search` of a request reach only the fields the field permissions show the user
+  (`PermitRouteBase.query_fields`), on the route and through a relation of another route
+  into the objects of the model; the related objects are restricted by `restrict_queryset`.
+  A field a `view` field permission hides from the user in every object of the list is 400
+  `ERR_FILTER` (as an unknown field), and a hidden search field is left out of the search.
+  The scope is per user, not per object: a field shown in only some objects (a
+  field permission with a selector such as `author`), or in an object that no field
+  permission matches (such an object has every field), can be filtered, sorted and
+  searched in all the objects the user sees. Hide such a field from the route (`fields`)
+  if its values must not be found by trial. The conditions of the permissions themselves
+  (selectors, `filter:` restrictions) are not restricted.
 
 ### Permission Cache
 

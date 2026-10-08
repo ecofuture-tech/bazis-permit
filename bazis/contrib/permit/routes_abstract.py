@@ -509,6 +509,47 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
             services[key] = service_cls(user)
         return services[key]
 
+    @classmethod
+    def _permit_service_on_class(cls, user: User | AnonymousUser | None) -> PermitService | None:
+        """
+        The permission service for a call of the core on the class (`restrict_queryset`,
+        `query_fields`) with the user of the calling route: None there (a route without a
+        user) is the authenticated user of the request (`UserMixin.CTX_USER_REQUEST`), and
+        without one the roles for anonymous users. None if the user cannot have the roles of
+        bazis-permit (e.g. an anonymous user model without AnonymousUserPermitMixin): he
+        sees nothing.
+        """
+        if user is None:
+            user = UserMixin.CTX_USER_REQUEST.get()
+        permit = cls.permit_service_for(user)
+        return permit if hasattr(permit.user, 'role_current') else None
+
+    @classmethod
+    def query_fields(cls, user=None, **kwargs) -> list[SchemaField]:
+        """
+        The fields of the LIST schema of the route the field permissions of the user show in
+        some object (Bazis 2.9: the filter, the sorting and the search of a request start
+        with them, also through a relation into the objects of the model): the union of the
+        fields of the field groups that the objects match (`perms_field_groups`, in the
+        order of `restrict_queryset`), all the fields if an object can match none of them
+        (its schema has no field permissions), none if the user cannot have the roles of
+        bazis-permit. A field visible in only some objects of the list stays reachable for
+        all of them. Which objects are reached is decided by `restrict_queryset`.
+        """
+        if (permit := cls._permit_service_on_class(user)) is None:
+            return []
+        handler = permit.handler(CrudApiAction.LIST.access_action, cls.model)
+        factory = cls.schema_factories.get(CrudApiAction.LIST) or cls.build_schema_factory(
+            CrudApiAction.LIST
+        )
+        names = set()
+        for values, cond in handler.perms_field_groups:
+            names.update(f.name for f in factory.fields_patch(fields_restricts_collect(values)))
+            if not cond:
+                # every object matches this group or one before it
+                return [f for f in factory.fields_list if f.name in names]
+        return factory.fields_list
+
     @class_or_instance_method
     def restrict_queryset(
         self: type[Self] | Self,
@@ -520,24 +561,18 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
     ):
         """
         Restricts the queryset based on permissions for the given access action and user.
-        The core calls it on the class for the relationships and `included` of the other
-        routes, with the user of the calling route (None if that route has no user): then
-        the authenticated user of the request (`UserMixin.CTX_USER_REQUEST`) is used, and
-        without one the roles for anonymous users. It never fails for a missing user: a
-        user without the roles of bazis-permit sees nothing. The calls of a request share
-        the permission service of the user (`permit_service_for`).
+        The core calls it on the class for the relationships, `included` and the filters
+        through a relation of the other routes, with the user of the calling route
+        (`_permit_service_on_class`). It never fails for a missing user: a user without the
+        roles of bazis-permit sees nothing. The calls of a request share the permission
+        service of the user (`permit_service_for`).
                 :return: The restricted queryset.
         """
         if not permit:
             if isinstance(self, PermitRouteBase):
                 permit = self.inject.permit
-            else:
-                if user is None:
-                    user = UserMixin.CTX_USER_REQUEST.get()
-                permit = self.permit_service_for(user)
-                # e.g. an anonymous user model without AnonymousUserPermitMixin
-                if not hasattr(permit.user, 'role_current'):
-                    return qs.none()
+            elif (permit := self._permit_service_on_class(user)) is None:
+                return qs.none()
 
         permit_handler = permit.handler(access_action, qs.model)
         if not permit_handler.perms_item:

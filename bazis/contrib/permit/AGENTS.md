@@ -82,6 +82,9 @@ class DocumentRouteSet(PermitRouteBase):
 
 - Every route of a protected model inherits `PermitRouteBase` (`permit.W002` lists the
   JSON:API routes that do not). A route of public data declares `permit_public = True`.
+- The model of a `PermitRouteBase` route is a `PermitModelMixin` (a `PermitStructMixin`):
+  with another model the route and the relations into it fail with `AttributeError` as
+  soon as the user has a permission on the model (`permit.W003`, a warning).
 - The core (Bazis 2.7) lets an item reference only the objects the user can view (a
   reverse relation: link and unlink only the objects he can change), and `included` shows
   only the objects he can view, by `restrict_queryset` of the default route of the related
@@ -94,6 +97,14 @@ class DocumentRouteSet(PermitRouteBase):
   will be removed in 3.0; `permit.W001` reports the setting.
 - Override `restrict_queryset(qs, access_action, user=None, permit=None, **kwargs)` with
   `**kwargs`: the core calls it on the class.
+- With Bazis 2.9 the `filter`, `sort` and `search` of a request reach only the fields the
+  field permissions show the user: `PermitRouteBase.query_fields(user=None, **kwargs)` is
+  the union of the fields of the field groups the objects match (all the fields if an
+  object can match none: it has no field permissions). A field hidden in every object is
+  400 `ERR_FILTER`; a field shown in only some objects stays filterable, sortable and
+  searchable in all of them, so hide it in the route `fields` if its values must not be
+  found by trial. The internal conditions of the
+  permissions (`QueryToOrm` of selectors, `filter:` restrictions) are not restricted.
 - Permissions are cached per user for `BAZIS_PERMISSION_CACHE_EXPIRE` seconds and
   invalidated when roles, groups or permissions change through the ORM (`save`, `delete`,
   m2m); `QuerySet.update()` and `bulk_create()` do not invalidate the cache.
