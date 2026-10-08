@@ -247,7 +247,7 @@ a many-to-many field or a reverse relation (its `related_name`) to a selector so
 
 **Special selectors**:
 - `all` — permission applies to all objects
-- `self` — the object is the selector source itself (the user)
+- `self` — the object is the selector source itself (the user; a source of several objects matches each of them)
 - `author` — permission applies to objects where the user is the author
 - `org_owner` — permission applies to objects of the user's organization
 - `participants` — permission applies to objects where the user is one of the participants

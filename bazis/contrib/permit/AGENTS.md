@@ -25,7 +25,8 @@ entity.parent.field.change.all.children.filter:is_active=true  # relation may re
 - level `item` (objects) or `field` (fields of objects);
 - operations `add`, `view`, `change`, `delete`, `check` (verified on the saved item, after
   triggers filled its selectors) and custom ones;
-- selector `all`, `self` (the object is the selector source, e.g. the user), `author`
+- selector `all`, `self` (the object is the selector source, e.g. the user; a source of
+  several objects, a list or a queryset, matches each of them), `author`
   (bazis-author) or a relation linking the object to the user or his selector source
   (`org_owner`, a `PermitSelectorMixin` model with `get_selector_for_user`): a foreign key,
   a many-to-many field (`participants`) or a reverse relation by its `related_name`
