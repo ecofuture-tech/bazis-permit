@@ -241,12 +241,17 @@ class CustomAccessAction(AccessAction):
 
 #### SELECTOR
 
-Name of a field in the model whose value links the permission with an object.
+Name of a relation of the model that links the permission with an object: a foreign key,
+a many-to-many field or a reverse relation (its `related_name`) to a selector source (see
+[Selectors](#selectors)), or a path of relations to one (`parent__author`).
 
 **Special selectors**:
 - `all` — permission applies to all objects
+- `self` — the object is the selector source itself (the user)
 - `author` — permission applies to objects where the user is the author
 - `org_owner` — permission applies to objects of the user's organization
+- `participants` — permission applies to objects where the user is one of the participants
+  (a many-to-many field)
 
 #### ADDITIONAL
 
@@ -370,6 +375,45 @@ entity.document.item.view.org_owner
 
 **Meaning**: User can view documents where `org_owner` equals `user.organization`
 
+#### Many-to-many and Reverse Relations
+
+A selector can also be a many-to-many field of the model or a reverse relation of a
+selector source, named by its `related_name`. The object matches when the selector value
+(the user, his organization...) is one of its related objects:
+
+```python
+class Team(PermitModelMixin, DtMixin, UuidMixin, JsonApiMixin):
+    name = models.CharField(max_length=255)
+
+class Meeting(PermitModelMixin, AuthorMixin, DtMixin, UuidMixin, JsonApiMixin):
+    title = models.CharField(max_length=255)
+    participants = models.ManyToManyField(User, related_name='meetings', blank=True)
+    team = models.ForeignKey(Team, null=True, on_delete=models.SET_NULL, related_name='meetings')
+
+class User(UserPermitMixin, PermitSelectorMixin, UuidMixin, UserAbstract, JsonApiMixin):
+    team = models.ForeignKey(Team, null=True, on_delete=models.SET_NULL, related_name='members')
+    teams_watched = models.ManyToManyField(Team, related_name='watchers', blank=True)
+```
+
+```
+entity.meeting.item.view.participants         # many-to-many: the user is a participant
+entity.team.item.view.members                 # reverse foreign key: the team of the user
+entity.team.item.view.watchers                # reverse many-to-many: the teams he watches
+entity.meeting.item.view.team__members        # a path: the meetings of the user's team
+entity.meeting.item.change.participants
+entity.meeting.item.check.participants        # a change must keep the user a participant
+entity.meeting.field.view.participants.description.disable
+```
+
+Such a selector is an `EXISTS` subquery (`<selector>__pk=<value>`): an object matches once,
+whatever the number of its related objects, also combined with other permissions
+(`view.author` and `view.participants`). It works for every operation, the field
+permissions and the custom operations (the transits of bazis-statusy:
+`app.model.item.transit.participants.<status>.<transit>`). The subquery uses the unique
+index of the automatic through table (`object_id`, `user_id`) and the index of a foreign
+key; a custom `through` model needs a unique constraint or an index on its two foreign
+keys. `autogen_selectors_fields` is not needed for these selectors.
+
 ## Usage
 
 ### Creating Models
@@ -418,7 +462,7 @@ class ParentEntity(PermitModelMixin, AuthorMixin, DtMixin, UuidMixin, JsonApiMix
 
 **Selector Auto-generation**:
 
-`autogen_selectors_fields` — list of fields for which selector fields with GIN indexes will be automatically created. If `None` — auto-generation is disabled.
+`autogen_selectors_fields` — list of fields for which selector fields with GIN indexes will be automatically created. If `None` — auto-generation is disabled. Many-to-many and reverse relation selectors do not need them (see [Many-to-many and Reverse Relations](#many-to-many-and-reverse-relations)).
 
 ### Creating Permissions
 
