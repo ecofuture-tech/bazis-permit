@@ -118,7 +118,8 @@ class PermitStructMixin:
         the presence of selectors, an empty dictionary can be returned, making only the 'all' selector applicable.
         Returns a dictionary of selector fields, where the key is the field name and the value is the selector
         model (e.g., User, Organization).
-        In standard Django models, this dictionary is generated based on fields that refer to selector models.
+        In standard Django models (PermitModelMixin), this dictionary is generated from the relations to
+        selector models: foreign keys, many-to-many fields and reverse relations (by their related_name).
         """
         raise NotImplementedError
 

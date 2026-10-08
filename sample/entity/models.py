@@ -23,7 +23,7 @@ from bazis_test_utils.models_abstract import (
 )
 
 from bazis.contrib.author.models_abstract import AuthorMixin
-from bazis.contrib.permit.models_abstract import PermitModelMixin
+from bazis.contrib.permit.models_abstract import PermitModelMixin, PermitSelectorMixin
 from bazis.contrib.users import get_user_model
 from bazis.core.models_abstract import DtMixin, JsonApiMixin, UuidMixin
 from bazis.core.triggers import FieldsTransferTrigger, FieldTransferSchema
@@ -178,6 +178,65 @@ class ParentEntity(
 
         verbose_name = _('Parent entity')
         verbose_name_plural = _('Parent entities')
+
+
+class Team(PermitModelMixin, PermitSelectorMixin, DtMixin, UuidMixin, JsonApiMixin):
+    """
+    A team: its selectors are reverse relations of the user, `members` (the foreign key
+    `User.team`) and `watchers` (the many-to-many relation `User.teams_watched`). It is also
+    a selector source with several values: the teams the user watches.
+    """
+
+    name = models.CharField(_('Name'), max_length=255)
+
+    @classmethod
+    def get_selector_for_user(cls, user):
+        return list(cls.objects.filter(watchers=user))
+
+    class Meta:
+        verbose_name = _('Team')
+        verbose_name_plural = _('Teams')
+
+
+class Meeting(PermitModelMixin, AuthorMixin, DtMixin, UuidMixin, JsonApiMixin):
+    """
+    A meeting: its selectors are the many-to-many relations `participants` and `guest_teams`
+    (the teams the user watches) and the paths `team__members`, `guest_teams__members`.
+    """
+
+    title = models.CharField(_('Title'), max_length=255)
+    description = models.TextField(_('Description'), blank=True)
+    participants = models.ManyToManyField(
+        User, verbose_name=_('Participants'), related_name='meetings', blank=True
+    )
+    team = models.ForeignKey(
+        Team, verbose_name=_('Team'), on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='meetings',
+    )
+    guest_teams = models.ManyToManyField(
+        Team, verbose_name=_('Guest teams'), related_name='guest_meetings', blank=True
+    )
+
+    class Meta:
+        verbose_name = _('Meeting')
+        verbose_name_plural = _('Meetings')
+
+
+class Profile(PermitModelMixin, DtMixin, JsonApiMixin):
+    """
+    The profile of a user: its primary key is a one-to-one field to the user, the selector
+    `user`.
+    """
+
+    user = models.OneToOneField(
+        User, verbose_name=_('User'), on_delete=models.CASCADE, primary_key=True,
+        related_name='profile',
+    )
+    nickname = models.CharField(_('Nickname'), max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = _('Profile')
+        verbose_name_plural = _('Profiles')
 
 
 class Bookmark(DtMixin, UuidMixin, JsonApiMixin):

@@ -13,6 +13,9 @@ User → `roles` (one active: `role_current`) → `Role.groups_permission` →
 <app>.<model>.<level>.<operation>.<selector>[.<additional>]
 entity.document.item.view.org_owner            # documents of the user's organization
 entity.document.item.change.author             # documents the user is the author of
+entity.meeting.item.view.participants          # meetings the user participates in (m2m)
+entity.team.item.view.members                  # the team of the user (reverse of User.team)
+entity.meeting.item.view.team__members         # the meetings of the user's team
 entity.document.item.view.author=__selector__&is_active=true
 entity.document.field.view.all.description.enable
 entity.document.field.add.all.name.filter:^[A-Z]+$        # value must match
@@ -22,8 +25,19 @@ entity.parent.field.change.all.children.filter:is_active=true  # relation may re
 - level `item` (objects) or `field` (fields of objects);
 - operations `add`, `view`, `change`, `delete`, `check` (verified on the saved item, after
   triggers filled its selectors) and custom ones;
-- selector `all`, `author` (bazis-author) or a field linking the object to the user
-  (`org_owner`, through a `PermitSelectorMixin` model with `get_selector_for_user`).
+- selector `all`, `self` (the object is the selector source, e.g. the user), `author`
+  (bazis-author) or a relation linking the object to the user or his selector source
+  (`org_owner`, a `PermitSelectorMixin` model with `get_selector_for_user`): a foreign key,
+  a many-to-many field (`participants`) or a reverse relation by its `related_name`
+  (`members` for `User.team = ForeignKey(Team, related_name='members')`, `watchers` for
+  `User.teams_watched = ManyToManyField(Team, related_name='watchers')`), or a path of
+  relations (`team__members`). A many-to-many or reverse selector matches the objects the
+  user is one of the related objects of (an EXISTS subquery: no duplicates); it works for
+  the field permissions (`field.view.participants.description.disable`), `check` and
+  custom operations such as the transits of bazis-statusy
+  (`item.transit.participants.<status>.<transit>`). A custom `through` model needs a unique
+  constraint or index on its two foreign keys. A selector that is no such relation matches
+  nothing and is logged (`Permit: ... has no selector`).
 
 Roles for anonymous users: `Role(for_anonymous=True)`. Anonymous users never match a
 selector other than `all`.
@@ -59,8 +73,9 @@ class DocumentRouteSet(PermitRouteBase):
   `for_change`, `for_delete`, `for_create`, `crud_actions`.
 - Anonymous users can only read (create, update and delete are 403), within the roles
   marked `for_anonymous`.
-- Selector fields are generated only for foreign keys to `PermitSelectorMixin` models
-  (the user, an organization...); `autogen_selectors_fields` lists them.
+- Selector array fields (`autogen_<field>_selectors`, GIN) are generated only for the
+  forward relations to `PermitSelectorMixin` models listed in `autogen_selectors_fields`;
+  many-to-many and reverse selectors do not need them.
 - In custom actions check explicitly: `self.check_access(CrudAccessAction.VIEW, item)`.
 
 ## Rules
