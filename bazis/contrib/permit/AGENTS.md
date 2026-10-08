@@ -93,7 +93,7 @@ class DocumentRouteSet(PermitRouteBase):
   from the data of the objects the selector matches; `field.change.<selector>.<field>.readonly`
   marks it `readOnly: true` in `schema_update` of the item (the attributes schema in
   `$defs`), an update ignores it (200, the value unchanged) and its relationships
-  endpoints answer 403 `ERR_RELATIONSHIP_READONLY`.
+  endpoints answer 403 `ERR_RELATIONSHIP_READONLY` (bazis 2.8.1; a 500 before).
 - The users: the routes of bazis-users do not check permissions (`permit.W002` lists
   them). To restrict them, the user model also inherits `PermitModelMixin` (else
   `permit.W003`) and the project registers its own route set of it, a `PermitRouteBase`

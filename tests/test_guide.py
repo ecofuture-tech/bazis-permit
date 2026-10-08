@@ -18,6 +18,8 @@ selector `self`, the field permissions in the API, the names of the roles in a d
 migration, an override of `restrict_queryset`.
 """
 
+from importlib.metadata import version
+
 import pytest
 from bazis_test_utils.utils import get_api_client
 from entity.models import Team
@@ -31,6 +33,9 @@ from tests.test_permit_selectors import (  # noqa: F401  the fixture
     role_with,
     user_with,
 )
+
+
+BAZIS_VERSION = tuple(int(it) for it in version('bazis').split('.')[:3] if it.isdigit())
 
 
 @pytest.mark.django_db(transaction=True)
@@ -137,6 +142,9 @@ def test_read_only_fields_in_the_api(sample_app):
     meeting.refresh_from_db()
     assert (meeting.title, meeting.description) == ('Planning', 'Notes')
 
+    if BAZIS_VERSION < (2, 8, 1):
+        # bazis < 2.8.1 failed with 500 (KeyError) on a read-only relationship
+        return
     response = client.patch(
         f'{URL_MEETING}{meeting.id}/relationships/team',
         json_data={'data': {'type': 'entity.team', 'id': str(team.id)}},
