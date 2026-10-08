@@ -24,13 +24,13 @@ from itertools import chain
 
 import pytest
 from bazis_test_utils.utils import get_api_client
-from entity.models import Meeting, Team
+from entity.models import Meeting, Profile, Team
 from translated_fields import to_attribute
 
 from bazis.contrib.permit.models import GroupPermission, Permission, Role
 from bazis.contrib.permit.services import PermitService
 from bazis.contrib.users import get_user_model
-from bazis.core.schemas import AccessAction
+from bazis.core.schemas import AccessAction, CrudAccessAction
 
 
 User = get_user_model()
@@ -296,6 +296,91 @@ def test_selector_many_to_many_operation(no_selector_warnings):
     assert transits(participant) == {'confirm'}
     assert transits(outsider) == {'cancel'}
     assert transits(user_with('nobody', role)) == set()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_selector_many_to_many_check_on_create(sample_app, no_selector_warnings):
+    """
+    `check.participants` on a created meeting: its participants are saved before the check,
+    so the user creates only the meetings he takes part in.
+    """
+    role = role_with(
+        'meeting_create',
+        'entity.meeting.item.add.all',
+        'entity.meeting.item.view.participants',
+        'entity.meeting.item.check.participants',
+    )
+    user = user_with('user', role)
+    other = user_with('other', role)
+    client = get_api_client(sample_app, user.jwt_build())
+
+    def create(*participants):
+        return client.post(URL_MEETING, json_data={'data': {
+            'type': 'entity.meeting',
+            'bs:action': 'add',
+            'attributes': {'title': 'Planning'},
+            'relationships': {'participants': {
+                'data': [{'id': str(it.id), 'type': 'users.user'} for it in participants],
+            }},
+        }})
+
+    response = create(user, other)
+    assert response.status_code == 201, response.content
+    assert set(Meeting.objects.get(pk=response.json()['data']['id']).participants.all()) == {user, other}
+
+    assert create(other).status_code == 403
+    assert Meeting.objects.count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_selector_many_to_many_several_values(sample_app, no_selector_warnings):
+    """
+    A selector source with several values (`Team.get_selector_for_user`: the teams the user
+    watches) through a many-to-many field (`guest_teams`), and a many-to-many relation in the
+    middle of a path (`guest_teams__members`).
+    """
+    role = role_with(
+        'meeting_guest',
+        'entity.meeting.item.view.guest_teams',
+        'entity.meeting.item.view.guest_teams__members',
+    )
+    core, docs, ops = (Team.objects.create(name=it) for it in ('Core', 'Docs', 'Ops'))
+    watcher = user_with('watcher', role)
+    watcher.teams_watched.add(core, docs)
+    member = user_with('member', role, team=ops)
+    outsider = user_with('outsider', role)
+
+    with_core = Meeting.objects.create(title='Core')
+    with_core.guest_teams.add(core, ops)
+    with_docs = Meeting.objects.create(title='Docs')
+    with_docs.guest_teams.add(docs)
+    with_ops = Meeting.objects.create(title='Ops')
+    with_ops.guest_teams.add(ops)
+    Meeting.objects.create(title='None')
+
+    client = get_api_client(sample_app, watcher.jwt_build())
+    assert ids(client.get(URL_MEETING)) == sorted([str(with_core.id), str(with_docs.id)])
+    client = get_api_client(sample_app, member.jwt_build())
+    assert ids(client.get(URL_MEETING)) == sorted([str(with_core.id), str(with_ops.id)])
+    client = get_api_client(sample_app, outsider.jwt_build())
+    assert ids(client.get(URL_MEETING)) == []
+
+
+@pytest.mark.django_db(transaction=True)
+def test_selector_primary_key_one_to_one(no_selector_warnings):
+    """
+    A one-to-one field to the user that is the primary key of the model (not serialized) is
+    a selector, as every foreign key.
+    """
+    assert 'user' in Profile.get_selector_fields()
+    role = role_with('profile_own', 'entity.profile.item.view.user')
+    user = user_with('user', role)
+    other = user_with('other', role)
+    own = Profile.objects.create(user=user)
+    Profile.objects.create(user=other)
+
+    handler = PermitService(user).handler(CrudAccessAction.VIEW, Profile)
+    assert list(Profile.perms_item_apply(Profile.objects.all(), handler.perms_item)) == [own]
 
 
 @pytest.mark.django_db(transaction=True)

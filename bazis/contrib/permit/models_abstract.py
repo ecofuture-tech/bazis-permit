@@ -98,18 +98,26 @@ class PermitModelMixin(UserMixin, PermitStructMixin):
     def get_selector_fields(cls) -> dict[str, SelectorField]:
         """
         The selectors of the model: its relations to a PermitSelectorMixin model (the user,
-        an organization...), by name. A foreign key or one-to-one field, a many-to-many
-        field, or a reverse relation (by its accessor, the `related_name`) of a foreign key,
-        one-to-one or many-to-many field of the selector model.
+        an organization...), by name. A foreign key or one-to-one field (also one that is
+        the primary key or a parent link), a many-to-many field, or a reverse relation (by
+        its accessor, the `related_name`) of a foreign key, one-to-one or many-to-many field
+        of the selector model.
         """
         fields = {}
-        for name, rel in cls.get_fields_info().relations.items():
-            model = rel.related_model
+
+        def add(name, model, label):
             if isinstance(model, str):
                 model = apps.get_model(model)
-            if issubclass(model, PermitSelectorMixin):
-                label = getattr(rel.model_field, 'verbose_name', None) or name
-                fields[name] = SelectorField(name=name, label=str(label), model=model)
+            if model and issubclass(model, PermitSelectorMixin):
+                fields[name] = SelectorField(name=name, label=str(label or name), model=model)
+
+        # every foreign key and one-to-one field: the relations of the fields info leave out
+        # those that are not serialized (a primary key or parent link)
+        for f in cls._meta.fields:
+            add(f.name, getattr(f, 'related_model', None), f.verbose_name)
+        for name, rel in cls.get_fields_info().relations.items():
+            if rel.reverse or rel.is_m2m:
+                add(name, rel.related_model, getattr(rel.model_field, 'verbose_name', None))
         return fields
 
     @classmethod
