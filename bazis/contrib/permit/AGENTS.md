@@ -94,6 +94,14 @@ class DocumentRouteSet(PermitRouteBase):
   will be removed in 3.0; `permit.W001` reports the setting.
 - Override `restrict_queryset(qs, access_action, user=None, permit=None, **kwargs)` with
   `**kwargs`: the core calls it on the class.
+- With Bazis 2.9 the `filter`, `sort` and `search` of a request reach only the fields the
+  field permissions show the user: `PermitRouteBase.query_fields(user=None, **kwargs)` is
+  the union of the fields of the field groups the objects match (all the fields if an
+  object can match none: it has no field permissions). A field hidden in every object is
+  400 `ERR_FILTER`; a field shown in only some objects stays filterable, sortable and
+  searchable in all of them, so hide it in the route `fields` if its values must not be
+  found by trial. The internal conditions of the
+  permissions (`QueryToOrm` of selectors, `filter:` restrictions) are not restricted.
 - Permissions are cached per user for `BAZIS_PERMISSION_CACHE_EXPIRE` seconds and
   invalidated when roles, groups or permissions change through the ORM (`save`, `delete`,
   m2m); `QuerySet.update()` and `bulk_create()` do not invalidate the cache.
