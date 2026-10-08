@@ -22,9 +22,9 @@ except PackageNotFoundError:
 """
 Related objects of created and changed items:
 
-- `BAZIS_PERMIT_RELATIONS_VIEW_CHECK` (or `PermitRouteBase.relations_view_check`) allows
-  an item to reference only the objects of permission-protected models that the user can
-  view;
+- the core (Bazis 2.7) allows an item to reference only the objects the user can view
+  (`restrict_queryset` of `PermitRouteBase`, the default route of a protected model);
+  `PermitRouteBase.relation_targets_check = False` turns it off for a route;
 - `check` permissions are verified on the saved item, whose selectors are filled at that
   point: e.g. 'entity.extended_entity.item.check.author_parent' allows creating and
   changing extended entities only for the author of the parent record;

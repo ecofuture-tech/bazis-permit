@@ -12,9 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
+
 from django.utils.translation import gettext_lazy as _
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from bazis.core.utils.schemas import BazisSettings
 
@@ -28,10 +30,24 @@ class Settings(BazisSettings):
     BAZIS_PERMISSION_CACHE_EXPIRE: int = Field(
         7, title=_('Time to store user permissions, sec'), json_schema_extra={'dynamic': True}
     )
-    BAZIS_PERMIT_RELATIONS_VIEW_CHECK: bool = Field(
-        False,
+    #: deprecated, removed in bazis-permit 3.0: no effect, the core checks the objects the
+    #: relationships reference (bazis 2.7)
+    BAZIS_PERMIT_RELATIONS_VIEW_CHECK: bool | None = Field(
+        None,
         title=_('Created and changed items can reference only the objects the user can view'),
     )
+
+    @field_validator('BAZIS_PERMIT_RELATIONS_VIEW_CHECK')
+    @classmethod
+    def relations_view_check_deprecated(cls, value):
+        if value is not None:
+            warnings.warn(
+                'BAZIS_PERMIT_RELATIONS_VIEW_CHECK is deprecated, has no effect and will be '
+                'removed in bazis-permit 3.0: the core checks the related objects.',
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return value
 
 
 settings = Settings()

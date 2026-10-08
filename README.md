@@ -284,15 +284,22 @@ Only items with child_is_active=true can be added to child_entities
 
 ### Related Objects
 
-By default an item can reference any existing object through its relationships, including
-objects the user cannot view. Three tools restrict this:
+Three tools restrict the objects an item references through its relationships:
 
-- **`BAZIS_PERMIT_RELATIONS_VIEW_CHECK = True`** (recommended): a created or changed item can
-  reference only the objects of permission-protected models that the user can view (`view`
-  permission). Other references fail with `403` and the error code `ERR_RELATION_ACCESS`.
-  Only newly referenced objects are checked, so an unchanged relation to an object that
-  became invisible does not block a change. A route can override the setting with
-  `relations_view_check = True/False`.
+- **The visibility of the related objects** (Bazis 2.7, always on): a created or changed
+  item can reference only the objects the user can view (`view` permission), and a reverse
+  relation can link and unlink only the objects the user can change (`change` permission).
+  Other references fail with `403` and the error code `ERR_RELATION_ACCESS`. Only newly
+  referenced objects are checked, so an unchanged relation to an object that became
+  invisible does not block a change. `included` shows only the objects the user can view.
+  The core checks this with `restrict_queryset` of the default route of the related model,
+  `PermitRouteBase` for a permission-protected model; a route turns it off with
+  `relation_targets_check = False`. A route without a user (not a `UserRouteBase`) is
+  checked for the authenticated user of the request if it is known
+  (`UserMixin.CTX_USER_REQUEST`), otherwise as for an anonymous user.
+  `BAZIS_PERMIT_RELATIONS_VIEW_CHECK` and `PermitRouteBase.relations_view_check` are
+  deprecated and will be removed in 3.0: the setting has no effect,
+  `relations_view_check = False` works as `relation_targets_check = False`.
 - **`check` permissions** are verified on the saved item, whose selectors are filled at that
   point (also by triggers): `entity.extended_entity.item.check.author_parent` allows creating
   and changing extended entities only for the author of the parent entity.

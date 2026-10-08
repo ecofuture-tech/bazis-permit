@@ -23,9 +23,13 @@ def test_manifest_is_valid():
 
 
 def test_relations_view_check(settings):
-    settings.BAZIS_PERMIT_RELATIONS_VIEW_CHECK = False
-    assert [it.id for it in check_relations_view(None)] == ['permit.W001']
-    settings.BAZIS_PERMIT_RELATIONS_VIEW_CHECK = True
+    """
+    The deprecated BAZIS_PERMIT_RELATIONS_VIEW_CHECK is reported when it is set.
+    """
+    for value in (False, True):
+        settings.BAZIS_PERMIT_RELATIONS_VIEW_CHECK = value
+        assert [it.id for it in check_relations_view(None)] == ['permit.W001']
+    settings.BAZIS_PERMIT_RELATIONS_VIEW_CHECK = None
     assert check_relations_view(None) == []
 
 

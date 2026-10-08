@@ -39,7 +39,7 @@ import = "bazis.contrib.permit.models_abstract.PermitSelectorMixin"
 use_when = "a model that is a selector source: the user model (for `author`), an organization"
 
 [[pitfalls]]
-text = "BAZIS_PERMIT_RELATIONS_VIEW_CHECK is off by default: relations are not checked"
+text = "BAZIS_PERMIT_RELATIONS_VIEW_CHECK is deprecated and has no effect: the core checks the related objects (relation_targets_check)"
 check = "permit.W001"
 
 [[pitfalls]]

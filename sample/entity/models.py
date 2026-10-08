@@ -178,3 +178,23 @@ class ParentEntity(
 
         verbose_name = _('Parent entity')
         verbose_name_plural = _('Parent entities')
+
+
+class Bookmark(DtMixin, UuidMixin, JsonApiMixin):
+    """
+    A public model (not protected by permissions) whose route has no user: a bookmark of a
+    parent or dependent entity. Its relationships link only the entities the default
+    routes of the entities show (bazis 2.7).
+    """
+
+    title = models.CharField(_('Title'), max_length=255, blank=True)
+    parent_entity = models.ForeignKey(
+        'ParentEntity', on_delete=models.CASCADE, null=True, blank=True, related_name='bookmarks'
+    )
+    dependent_entity = models.ForeignKey(
+        'DependentEntity', on_delete=models.CASCADE, null=True, blank=True, related_name='bookmarks'
+    )
+
+    class Meta:
+        verbose_name = _('Bookmark')
+        verbose_name_plural = _('Bookmarks')
