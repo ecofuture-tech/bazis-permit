@@ -25,7 +25,7 @@ from django.db.models import Case, IntegerField, QuerySet, Value, When
 from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 
 from pydantic import BaseModel
 
@@ -483,6 +483,24 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         ):
             raise JsonApi403Exception()
 
+    def set_item(self, item_id: str, with_lock: bool = False, is_force: bool = False) -> JsonApiMixin:
+        """
+        The item of a route of an item (retrieve, update, delete, the relationships and the
+        schema routes, the transits of bazis-statusy): an item the user cannot view does not
+        exist for him, 404 as a missing one, so that the answer does not tell that it
+        exists; the routes answer 403 for an item he views but cannot change. The check is
+        made on a handler of its own: the cached one would keep the values of the item
+        before a write of the request (a transit that hides it).
+        """
+        previous = self.item
+        item = super().set_item(item_id, with_lock=with_lock, is_force=is_force)
+        if item is not previous:
+            permit = self.inject.permit
+            if not permit.handler_class(permit, CrudAccessAction.VIEW, item).check_access():
+                self.item = None
+                raise HTTPException(status_code=404, detail='Item not found')
+        return item
+
     @classmethod
     def permit_service_for(cls, user: User | AnonymousUser | None) -> PermitService:
         """
@@ -670,15 +688,15 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
                 actions.append(action.value)
         return actions
 
-    def update(self, *args, **kwargs) -> JsonApiMixin:
-        # in protected routes, anonymous users cannot create or update items
+    def update(self, item_id: str, *args, **kwargs) -> JsonApiMixin:
         """
         In protected routes, anonymous users cannot create or update items. Raises
-        JsonApi403Exception if the user is anonymous.
+        JsonApi403Exception if the user is anonymous (404 for an item he cannot view).
         """
         if self.inject.user.is_anonymous:
+            self.set_item(item_id)
             raise JsonApi403Exception
-        return super().update(*args, **kwargs)
+        return super().update(item_id, *args, **kwargs)
 
     def create(self, *args, **kwargs) -> JsonApiMixin:
         """
@@ -697,9 +715,9 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         JsonApi403Exception if the user is anonymous. Explicitly checks permissions for
         deletion.
         """
+        item = self.set_item(item_id)
         if self.inject.user.is_anonymous:
             raise JsonApi403Exception
-        item = self.set_item(item_id)
         # explicitly check permissions, as the schema is not built for deletion
         self.check_access(CrudAccessAction.DELETE, item)
         return super().destroy(item_id=item_id)

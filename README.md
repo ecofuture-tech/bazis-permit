@@ -575,10 +575,8 @@ class DocumentRouteSet(PermitRouteBase):
     @http_post('/{item_id}/sign/')
     def action_sign(self, item_id: str):
         """Sign document"""
+        # 404 if the user cannot view the document (as for a missing one)
         document = self.set_item(item_id)
-        
-        # Check: can user view the document
-        self.check_access(CrudAccessAction.VIEW, document)
         
         # Check: can user create signature
         self.check_access(
@@ -755,11 +753,11 @@ def test_permissions(sample_app):
     )
     assert response.status_code == 200
     
-    # user_2 cannot view another user's document
+    # user_2 cannot view another user's document: it is not found for him
     response = get_api_client(sample_app, user_2.jwt_build()).get(
         f'/api/v1/documents/document/{doc_id}/'
     )
-    assert response.status_code == 403
+    assert response.status_code == 404
 ```
 
 ### Example 5: Client Usage

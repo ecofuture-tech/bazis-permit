@@ -74,10 +74,16 @@ class DocumentRouteSet(PermitRouteBase):
   `for_change`, `for_delete`, `for_create`, `crud_actions`.
 - Anonymous users can only read (create, update and delete are 403), within the roles
   marked `for_anonymous`.
+- An item the user cannot view does not exist for him: the routes of an item (retrieve,
+  update, delete, the relationships endpoints, `schema_retrieve`, `schema_update`, the
+  transits of bazis-statusy) answer 404 `Item not found`, as for a missing item
+  (`PermitRouteBase.set_item`); an item he views but cannot change or delete is 403.
 - Selector array fields (`autogen_<field>_selectors`, GIN) are generated only for the
   forward relations to `PermitSelectorMixin` models listed in `autogen_selectors_fields`;
   many-to-many and reverse selectors do not need them.
-- In custom actions check explicitly: `self.check_access(CrudAccessAction.VIEW, item)`.
+- In custom actions take the item with `self.set_item(item_id)` (404 for an item the user
+  cannot view) and check the other operations explicitly:
+  `self.check_access(CrudAccessAction.CHANGE, item)` (403).
 
 ## Rules
 
