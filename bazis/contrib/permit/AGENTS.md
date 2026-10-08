@@ -82,6 +82,9 @@ class DocumentRouteSet(PermitRouteBase):
 
 - Every route of a protected model inherits `PermitRouteBase` (`permit.W002` lists the
   JSON:API routes that do not). A route of public data declares `permit_public = True`.
+- The model of a `PermitRouteBase` route is a `PermitModelMixin` (a `PermitStructMixin`):
+  with another model the route and the relations into it fail with `AttributeError` as
+  soon as the user has a permission on the model (`permit.W003`, a warning).
 - The core (Bazis 2.7) lets an item reference only the objects the user can view (a
   reverse relation: link and unlink only the objects he can change), and `included` shows
   only the objects he can view, by `restrict_queryset` of the default route of the related

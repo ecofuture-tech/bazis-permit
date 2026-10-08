@@ -48,6 +48,10 @@ text = "a JSON:API route that does not inherit PermitRouteBase serves its model 
 check = "permit.W002"
 
 [[pitfalls]]
+text = "the model of a PermitRouteBase route must be a PermitModelMixin (PermitStructMixin): otherwise its route, `included` and the filters through a relation into it fail with AttributeError once the user has a permission on it"
+check = "permit.W003"
+
+[[pitfalls]]
 text = "the filter, sort and search of a request reach the fields the field permissions show the user in some object (Bazis 2.9, PermitRouteBase.query_fields): a field shown in only some objects, or in an object no field permission matches, stays reachable in all of them; hide it in the route `fields` if its values must not be found"
 
 [[pitfalls]]

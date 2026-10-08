@@ -74,3 +74,38 @@ def check_routes_permit(app_configs, **kwargs):
         and not issubclass(route_cls, PermitRouteBase)
         and not getattr(route_cls, 'permit_public', False)
     ]
+
+
+@register()
+def check_routes_permit_model(app_configs, **kwargs):
+    """
+    A permission route (`PermitRouteBase`) resolves the permissions of its model through
+    `PermitStructMixin` (`PermitModelMixin` for a Django model): with another model its list,
+    items, `included` and the filters through a relation into it fail as soon as the user
+    has a permission on the model. A Warning (not an Error), so that `migrate` and the
+    server still start. Runs when the application is loaded (`manage.py bazis_doctor`).
+    """
+    from bazis.core.introspect import loaded_app, route_sets
+
+    if (app := loaded_app()) is None:
+        return []
+
+    from .routes_abstract import PermitRouteBase
+    from .schemas import PermitStructMixin
+
+    return [
+        Warning(
+            f'The model {route_cls.model._meta.label} of the permission route '
+            f'{route_cls.__module__}.{route_cls.__qualname__} does not support permissions.',
+            hint=(
+                'Inherit the model from bazis.contrib.permit.models_abstract.PermitModelMixin '
+                '(a StatusyChildMixin model of bazis-statusy: update bazis-statusy to 2.5), or '
+                'serve it with a route that is not a PermitRouteBase.'
+            ),
+            obj=route_cls,
+            id='permit.W003',
+        )
+        for route_cls in route_sets(app)
+        if issubclass(route_cls, PermitRouteBase)
+        and not issubclass(route_cls.model, PermitStructMixin)
+    ]
