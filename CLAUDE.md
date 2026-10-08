@@ -5,7 +5,11 @@ Role-based permissions for Bazis: roles → permission groups → permissions wi
 loads and caches the permission tree of the current role, `PermitHandler` resolves
 selectors into query conditions (`utils.py`), and `PermitRouteBase` (`routes_abstract.py`)
 restricts querysets, builds schemas with the allowed fields and checks created/changed
-items (`check` permissions, `BAZIS_PERMIT_RELATIONS_VIEW_CHECK`).
+items (`check` permissions). Its `restrict_queryset` is also the visibility of the objects
+of a protected model for the relationships and `included` of the other routes: the core
+calls it on the class (Bazis 2.7, `relations_access_check`); it must accept `**kwargs`
+and never fail without a user. `BAZIS_PERMIT_RELATIONS_VIEW_CHECK` and
+`relations_view_check` are deprecated (removal in 3.0).
 
 This is the security boundary of the applications: every change needs a test that shows
 both the allowed and the denied case (see `tests/test_permit_relations.py`). The sample

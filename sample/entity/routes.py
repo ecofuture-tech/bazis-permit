@@ -16,6 +16,7 @@ from django.apps import apps
 
 from bazis.contrib.author.routes_abstract import AuthorRouteBase
 from bazis.contrib.permit.routes_abstract import PermitRouteBase
+from bazis.core.routes_abstract.jsonapi import JsonapiRouteBase
 from bazis.core.schemas import SchemaField, SchemaFields
 
 
@@ -70,3 +71,13 @@ class ParentEntityRouteSet(PermitRouteBase, AuthorRouteBase):
             },
         ),
     }
+
+class BookmarkRouteSet(JsonapiRouteBase):
+    """
+    A route without a user (not a UserRouteBase) of a public model: the parent entities it
+    links and includes are restricted for the user of the request (or as for an anonymous
+    user) by the default route of the parent entities.
+    """
+
+    model = apps.get_model('entity.Bookmark')
+    permit_public = True

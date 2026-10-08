@@ -15,7 +15,11 @@
 """
 An item can reference only the objects the user can view: otherwise a user could attach
 records to objects of other users (e.g. a dependent entity to a foreign parent entity).
+The core checks it (bazis 2.7, `relations_access_check`) with `restrict_queryset` of the
+default route of the related model, the permissions for a route of bazis-permit.
 """
+
+import warnings
 
 import pytest
 from bazis_test_utils.utils import get_api_client
@@ -39,11 +43,6 @@ PERMISSIONS = [
     'entity.dependent_entity.item.view.all',
     'entity.dependent_entity.item.change.author',
 ]
-
-
-@pytest.fixture(autouse=True)
-def relations_check(settings):
-    settings.BAZIS_PERMIT_RELATIONS_VIEW_CHECK = True
 
 
 @pytest.fixture
@@ -129,16 +128,22 @@ def test_relations_check_disabled_for_route(sample_app, users, monkeypatch):
 
     owner, stranger = users
     foreign_parent = factories.ParentEntityFactory.create(author=owner, child_entities=False)
-    monkeypatch.setattr(DependentEntityRouteSet, 'relations_view_check', False)
+    client = get_api_client(sample_app, stranger.jwt_build())
 
-    response = get_api_client(sample_app, stranger.jwt_build()).post(
-        '/api/v1/entity/dependent_entity/', json_data=_dependent_payload(foreign_parent)
-    )
+    response = client.post('/api/v1/entity/dependent_entity/', json_data=_dependent_payload(foreign_parent))
+    assert response.status_code == 403
+    assert response.json()['errors'][0]['code'] == 'ERR_RELATION_ACCESS'
+
+    monkeypatch.setattr(DependentEntityRouteSet, 'relation_targets_check', False)
+    response = client.post('/api/v1/entity/dependent_entity/', json_data=_dependent_payload(foreign_parent))
     assert response.status_code == 201
 
 
 @pytest.mark.django_db(transaction=True)
-def test_relations_check_disabled_by_default(sample_app, users, settings):
+def test_relations_view_setting_has_no_effect(sample_app, users, settings):
+    """
+    The deprecated BAZIS_PERMIT_RELATIONS_VIEW_CHECK no longer turns the check off.
+    """
     owner, stranger = users
     foreign_parent = factories.ParentEntityFactory.create(author=owner, child_entities=False)
     settings.BAZIS_PERMIT_RELATIONS_VIEW_CHECK = False
@@ -146,7 +151,47 @@ def test_relations_check_disabled_by_default(sample_app, users, settings):
     response = get_api_client(sample_app, stranger.jwt_build()).post(
         '/api/v1/entity/dependent_entity/', json_data=_dependent_payload(foreign_parent)
     )
-    assert response.status_code == 201
+    assert response.status_code == 403
+    assert response.json()['errors'][0]['code'] == 'ERR_RELATION_ACCESS'
+
+
+def test_relations_view_check_deprecated(monkeypatch):
+    """
+    The deprecated `relations_view_check` warns; False turns the check of the core off.
+    """
+    from entity.routes import DependentEntityRouteSet
+
+    # a route class becomes the default route of its model: restore it
+    monkeypatch.setattr(DependentEntity, '_default_route', DependentEntity.get_default_route())
+
+    with pytest.warns(DeprecationWarning, match='relations_view_check'):
+        class OptedOut(DependentEntityRouteSet):
+            relations_view_check = False
+
+    with pytest.warns(DeprecationWarning, match='relations_view_check'):
+        class OptedIn(DependentEntityRouteSet):
+            relations_view_check = True
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+
+        class NotSet(DependentEntityRouteSet):
+            pass
+
+    assert OptedOut.relation_targets_check is False
+    assert OptedIn.relation_targets_check is True
+    assert NotSet.relation_targets_check is True
+
+
+def test_relations_view_setting_deprecated():
+    from bazis.contrib.permit.conf import Settings
+
+    with pytest.warns(DeprecationWarning, match='BAZIS_PERMIT_RELATIONS_VIEW_CHECK'):
+        Settings(BAZIS_PERMIT_RELATIONS_VIEW_CHECK=True)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        assert Settings().BAZIS_PERMIT_RELATIONS_VIEW_CHECK is None
 
 
 @pytest.mark.django_db(transaction=True)
@@ -269,11 +314,10 @@ def test_relationships_endpoint_checks_relations(sample_app, users):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_relationships_endpoint_requires_change(sample_app, users, settings):
+def test_relationships_endpoint_requires_change(sample_app, users):
     """
     The relationships endpoints changed relations of any object, without permissions.
     """
-    settings.BAZIS_PERMIT_RELATIONS_VIEW_CHECK = False
     owner, stranger = users
     parent = factories.ParentEntityFactory.create(author=owner, child_entities=False)
     foreign_dependent = factories.DependentEntityFactory.create(author=owner, parent_entity=parent)
@@ -390,3 +434,141 @@ def test_relationships_endpoint_filter_restricts_unlinking(sample_app):
 
     assert delete(active).status_code == 204
     assert set(parent.child_entities.all()) == {inactive}
+
+
+def _bookmark_payload(parent) -> dict:
+    return {
+        'data': {
+            'type': 'entity.bookmark',
+            'bs:action': 'add',
+            'attributes': {'title': 'Bookmark'},
+            'relationships': {
+                'parent_entity': {'data': {'id': str(parent.id), 'type': 'entity.parent_entity'}},
+            },
+        },
+    }
+
+
+@pytest.mark.django_db(transaction=True)
+def test_route_without_user_checks_as_anonymous(sample_app, users):
+    """
+    A route without a user (here a public route, not a UserRouteBase) does not know the
+    user of the request: it links only the parent entities the roles for anonymous users
+    show, whoever sends the request.
+    """
+    owner, stranger = users
+    foreign_parent = factories.ParentEntityFactory.create(author=owner, child_entities=False)
+    own_parent = factories.ParentEntityFactory.create(author=stranger, child_entities=False)
+    client = get_api_client(sample_app, stranger.jwt_build())
+
+    for parent in (foreign_parent, own_parent):
+        response = client.post('/api/v1/entity/bookmark/', json_data=_bookmark_payload(parent))
+        assert response.status_code == 403
+        assert response.json()['errors'][0]['code'] == 'ERR_RELATION_ACCESS'
+
+    _anonymous_role('entity.parent_entity.item.view.all')
+    response = client.post('/api/v1/entity/bookmark/', json_data=_bookmark_payload(foreign_parent))
+    assert response.status_code == 201
+
+
+@pytest.mark.django_db(transaction=True)
+def test_restrict_queryset_user_of_the_request(users):
+    """
+    Called without a user, `restrict_queryset` restricts for the authenticated user of the
+    request (`UserMixin.CTX_USER_REQUEST`, set by the routes of bazis-users).
+    """
+    from entity.models import ParentEntity
+
+    from bazis.contrib.users.models_abstract import UserMixin
+    from bazis.core.schemas import CrudAccessAction
+
+    owner, stranger = users
+    own_parent = factories.ParentEntityFactory.create(author=stranger, child_entities=False)
+    factories.ParentEntityFactory.create(author=owner, child_entities=False)
+    route = ParentEntity.get_default_route()
+
+    def visible():
+        return set(route.restrict_queryset(ParentEntity.objects.all(), CrudAccessAction.VIEW))
+
+    assert visible() == set()
+    token = UserMixin.CTX_USER_REQUEST.set(stranger)
+    try:
+        assert visible() == {own_parent}
+    finally:
+        UserMixin.CTX_USER_REQUEST.reset(token)
+
+
+def _anonymous_role(*slugs):
+    group = GroupPermission.objects.create(slug='anonymous', **{to_attribute('name'): 'anonymous'})
+    for slug in slugs:
+        group.permissions.add(Permission.objects.get_or_create(slug=slug)[0])
+    role = Role.objects.create(
+        slug='role_anonymous', for_anonymous=True, **{to_attribute('name'): 'anonymous'}
+    )
+    role.groups_permission.add(group)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_anonymous_included_hidden(sample_app):
+    """
+    `included` of an anonymous request omits the objects the roles for anonymous users do
+    not show; the relationship keeps the identifier.
+    """
+    from entity.models import Bookmark
+
+    _anonymous_role(
+        'entity.dependent_entity.item.view.all',
+        # a selector permission matches nothing for an anonymous user
+        'entity.parent_entity.item.view.author',
+    )
+    parent = factories.ParentEntityFactory.create(child_entities=False)
+    dependent = factories.DependentEntityFactory.create(parent_entity=parent)
+    bookmark = Bookmark.objects.create(title='Bookmark', parent_entity=parent)
+    client = get_api_client(sample_app)
+
+    for url in (
+        f'/api/v1/entity/dependent_entity/{dependent.id}/?include=parent_entity',
+        f'/api/v1/entity/bookmark/{bookmark.id}/?include=parent_entity',
+    ):
+        response = client.get(url)
+        assert response.status_code == 200, url
+        data = response.json()
+        assert data['data']['relationships']['parent_entity']['data']['id'] == str(parent.id)
+        assert data.get('included', []) == []
+
+    # a saved permission invalidates the cached permissions
+    permission = Permission.objects.get(slug='entity.parent_entity.item.view.author')
+    permission.slug = 'entity.parent_entity.item.view.all'
+    permission.save()
+    response = client.get(f'/api/v1/entity/bookmark/{bookmark.id}/?include=parent_entity')
+    assert [it['id'] for it in response.json()['included']] == [str(parent.id)]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_anonymous_user_model_without_roles(sample_app, monkeypatch):
+    """
+    `restrict_queryset` never fails for a missing user: with an anonymous user model
+    without the roles of bazis-permit (no AnonymousUserPermitMixin) nothing is visible.
+    """
+    from entity.models import Bookmark, ParentEntity
+
+    from bazis.contrib.permit import services
+    from bazis.contrib.users.models_abstract import AnonymousUserAbstract
+    from bazis.core.schemas import CrudAccessAction
+
+    class PlainAnonymousUser(AnonymousUserAbstract):
+        pass
+
+    monkeypatch.setattr(services, 'AnonymousUser', PlainAnonymousUser)
+    parent = factories.ParentEntityFactory.create(child_entities=False)
+    bookmark = Bookmark.objects.create(title='Bookmark', parent_entity=parent)
+
+    route = ParentEntity.get_default_route()
+    assert not route.restrict_queryset(ParentEntity.objects.all(), CrudAccessAction.VIEW).exists()
+    assert not route.restrict_queryset(
+        ParentEntity.objects.all(), CrudAccessAction.VIEW, user=PlainAnonymousUser()
+    ).exists()
+
+    response = get_api_client(sample_app).get(f'/api/v1/entity/bookmark/{bookmark.id}/?include=parent_entity')
+    assert response.status_code == 200
+    assert response.json().get('included', []) == []

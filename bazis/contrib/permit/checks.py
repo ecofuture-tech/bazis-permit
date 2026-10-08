@@ -23,16 +23,19 @@ from django.core.checks import Warning, register
 @register()
 def check_relations_view(app_configs, **kwargs):
     """
-    Without the relations check a user can link objects he cannot see (and unlink the
-    objects of a reverse relation he cannot change).
+    BAZIS_PERMIT_RELATIONS_VIEW_CHECK is deprecated and has no effect: the core checks the
+    objects the relationships reference (bazis 2.7).
     """
     # the settings of the package are missing if BS_BAZIS_APPS does not list it
-    if not getattr(settings, 'BAZIS_PERMIT_RELATIONS_VIEW_CHECK', False):
+    if getattr(settings, 'BAZIS_PERMIT_RELATIONS_VIEW_CHECK', None) is not None:
         return [
             Warning(
-                'The objects referenced by relationships are not checked against the '
-                'permissions of the user.',
-                hint='Set BS_BAZIS_PERMIT_RELATIONS_VIEW_CHECK=true.',
+                'BAZIS_PERMIT_RELATIONS_VIEW_CHECK is deprecated and has no effect: the core '
+                'checks the objects referenced by relationships.',
+                hint=(
+                    'Remove BS_BAZIS_PERMIT_RELATIONS_VIEW_CHECK; '
+                    '`relation_targets_check = False` turns the check off for a route.'
+                ),
                 id='permit.W001',
             )
         ]

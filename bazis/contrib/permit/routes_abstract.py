@@ -15,13 +15,12 @@
 import dataclasses
 import inspect
 import logging
+import warnings
 from collections import UserDict, defaultdict
 from collections.abc import Callable, Iterable
 from functools import reduce
 from typing import Any, Self
 
-from django.conf import settings
-from django.core.exceptions import ValidationError
 from django.db.models import Case, IntegerField, QuerySet, Value, When
 from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
@@ -31,8 +30,9 @@ from fastapi import Depends
 from pydantic import BaseModel
 
 from bazis.contrib.users import get_anonymous_user_model, get_user_model
+from bazis.contrib.users.models_abstract import UserMixin
 from bazis.contrib.users.routes_abstract import UserRouteBase
-from bazis.core.errors import JsonApi403Exception, JsonApiBazisError, JsonApiBazisException
+from bazis.core.errors import JsonApi403Exception
 from bazis.core.models_abstract import JsonApiMixin
 from bazis.core.routes_abstract.initial import http_get, inject_make
 from bazis.core.routes_abstract.jsonapi import RestrictedQsRouteMixin, with_cache_openapi_schema
@@ -164,7 +164,8 @@ class _SchemasPermitHelper:
                     permit_handler = self.permit_service.handler(
                         self.api_action.access_action, item
                     )
-                    # check access rights
+                    # the core leaves out the objects the user cannot view (bazis 2.7); the
+                    # update schema includes only the objects the user can change
                     if not permit_handler.check_access():
                         continue
 
@@ -358,10 +359,9 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
     schemas: SchemasPermit
     schemas_responses: SchemasPermit
 
-    #: a created or changed item can reference (through its relationships) only the objects
-    #: of permission-protected models that the user can view; otherwise the request fails
-    #: with 403 ERR_RELATION_ACCESS. Only newly referenced objects are checked.
-    #: None - BAZIS_PERMIT_RELATIONS_VIEW_CHECK decides.
+    #: deprecated, removed in bazis-permit 3.0: the core checks the objects the relationships
+    #: of a created or changed item reference (`relation_targets_check`, bazis 2.7). False
+    #: turns that check off (`relation_targets_check = False`), True does nothing.
     relations_view_check: bool | None = None
 
     fields: dict[ApiAction, SchemaFields] = {
@@ -387,6 +387,16 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         properties, such as excluding creation and update actions for proxy models.
         """
         super().cls_init()
+        if cls.relations_view_check is not None:
+            warnings.warn(
+                f'{cls.__module__}.{cls.__qualname__}: relations_view_check is deprecated and '
+                'will be removed in bazis-permit 3.0; the core checks the related objects, '
+                'relation_targets_check = False turns the check off.',
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if cls.relations_view_check is False:
+                cls.relation_targets_check = False
         # creation/update actions are not available for proxy models, as they can change the state
         # of visibility of proxy model objects
         if cls.model._meta.proxy:
@@ -478,20 +488,31 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         self: type[Self] | Self,
         qs: QuerySet,
         access_action: AccessAction,
-        user: User = None,
+        user: User | AnonymousUser | None = None,
         permit: PermitService = None,
+        **kwargs,
     ):
         """
         Restricts the queryset based on permissions for the given access action and user.
+        The core calls it on the class for the relationships and `included` of the other
+        routes, with the user of the calling route (None if that route has no user): then
+        the authenticated user of the request (`UserMixin.CTX_USER_REQUEST`) is used, and
+        without one the roles for anonymous users. It never fails for a missing user: a
+        user without the roles of bazis-permit sees nothing.
                 :return: The restricted queryset.
         """
         if not permit:
             if isinstance(self, PermitRouteBase):
                 permit = self.inject.permit
             else:
+                if user is None:
+                    user = UserMixin.CTX_USER_REQUEST.get()
                 permit = [
                     f for f in dataclasses.fields(self.InjectPermit) if f.name == 'permit'
                 ][0].type(user)
+                # e.g. an anonymous user model without AnonymousUserPermitMixin
+                if not hasattr(permit.user, 'role_current'):
+                    return qs.none()
 
         permit_handler = permit.handler(access_action, qs.model)
         if not permit_handler.perms_item:
@@ -623,115 +644,13 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         self.check_access(CrudAccessAction.DELETE, item)
         return super().destroy(item_id=item_id)
 
-    @staticmethod
-    def _relation_ids(value, rel_model) -> set[str]:
-        """
-        The identifiers referenced by a relationship value, normalized by the primary key
-        field of the related model (e.g. a UUID in upper case).
-        """
-        rel_data = (value or {}).get('data')
-        if isinstance(rel_data, list):
-            raw_ids = [it['id'] for it in rel_data if it and it.get('id') is not None]
-        elif rel_data and rel_data.get('id') is not None:
-            raw_ids = [rel_data['id']]
-        else:
-            raw_ids = []
-
-        pk_field = rel_model._meta.pk
-        try:
-            return {str(pk_field.to_python(raw_id)) for raw_id in raw_ids}
-        except ValidationError:
-            raise JsonApiBazisException(
-                JsonApiBazisError(
-                    detail=str(_('Invalid identifier of the related object')),
-                    code='ERR_RELATION_ID',
-                    title=str(_('Invalid identifier')),
-                    status=400,
-                ),
-                status=400,
-            ) from None
-
-    def check_relations_access(self, data: Any, item: JsonApiMixin = None, action: str = 'set'):
-        """
-        Checks that the objects referenced by the relationships of the item data are
-        visible to the user (the view permission of their model). A reverse relationship
-        changes the referenced objects (their foreign key), so the objects it links and
-        the objects it unlinks must be changeable (the change permission). For a changed
-        item only the objects whose link changes are checked. `action` is the action of
-        the relationships endpoints (`add`, `remove`, `set`; an update sets the value).
-        Models without a permission route are not checked.
-        """
-        enabled = self.relations_view_check
-        if enabled is None:
-            enabled = settings.BAZIS_PERMIT_RELATIONS_VIEW_CHECK
-        if not enabled or not getattr(data, 'relationships', None):
-            return
-
-        model = type(item) if item is not None else JsonApiMixin.get_model_by_label(data.type)
-        relations = model.get_fields_info().relations
-
-        for f_name, value in data.relationships.model_dump(exclude_unset=True).items():
-            if not (field_info := relations.get(f_name)):
-                continue
-            rel_model = field_info.related_model
-            if not is_model_permit(rel_model):
-                continue
-
-            ids = self._relation_ids(value, rel_model)
-            unlinked = set()
-            if item is not None:
-                if field_info.to_many:
-                    current = {str(pk) for pk in getattr(item, f_name).values_list('pk', flat=True)}
-                elif not field_info.reverse:
-                    pk = getattr(item, field_info.model_field.attname, None)
-                    current = {str(pk)} if pk is not None else set()
-                elif current_obj := getattr(item, f_name, None):
-                    current = {str(current_obj.pk)}
-                else:
-                    current = set()
-
-                if action == 'remove':
-                    # removing a to-one relation clears it whatever the request refers to
-                    ids, unlinked = set(), (ids & current if field_info.to_many else current)
-                elif action == 'add':
-                    ids -= current
-                else:
-                    ids, unlinked = ids - current, current - ids
-
-            if field_info.reverse:
-                self._check_related_access(f_name, rel_model, ids | unlinked, CrudAccessAction.CHANGE)
-            else:
-                self._check_related_access(f_name, rel_model, ids, CrudAccessAction.VIEW)
-
-    def _check_related_access(self, f_name, rel_model, ids: set[str], access_action):
-        if not ids:
-            return
-        allowed = rel_model.get_default_route().restrict_queryset(
-            rel_model.objects.filter(pk__in=ids),
-            access_action,
-            permit=self.inject.permit,
-        )
-        # a permission condition over a to-many relation can return an object several times
-        if ids - {str(pk) for pk in allowed.values_list('pk', flat=True)}:
-            raise JsonApiBazisException(
-                JsonApiBazisError(
-                    detail=str(_('No access to the related object')),
-                    loc=('body', 'data', 'relationships', f_name),
-                    code='ERR_RELATION_ACCESS',
-                    title=str(_('Access denied')),
-                    status=403,
-                ),
-                status=403,
-            )
-
     def hook_before_relationships_change(self, item, data, related_field_name, action):
         """
         The relationships endpoints: the update schema already checked the change
-        permission; the referenced objects are checked as for an update of the item.
+        permission, the core the referenced objects (`relations_access_check`).
         """
         if self.inject.user.is_anonymous:
             raise JsonApi403Exception
-        self.check_relations_access(data, item, action)
         super().hook_before_relationships_change(item, data, related_field_name, action)
 
     def hook_after_relationships_change(self, item, data, related_field_name, action):
@@ -742,7 +661,6 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         """
         Updates the item with the given data, checking permissions for the update action.
         """
-        self.check_relations_access(data, item)
         item = super().item_update(item, data)
         self.check_access(CrudAccessAction.CHECK, item, item_passive=True)
         return item
@@ -751,7 +669,6 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         """
         Creates an item with the given data, checking permissions for the create action.
         """
-        self.check_relations_access(data)
         item = super().item_create(data)
         self.check_access(CrudAccessAction.CHECK, item, item_passive=True)
         return item

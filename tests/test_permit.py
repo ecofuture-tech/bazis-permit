@@ -204,7 +204,8 @@ def test_permit(sample_app, groups):
             ],
         )
     )
-    user_3.roles.add(role_create(groups,'role_user3', ['child_entity']))
+    role_user3 = role_create(groups, 'role_user3', ['child_entity'])
+    user_3.roles.add(role_user3)
 
     # now user_1 can create records in parent_entity
     response = get_api_client(sample_app, user_1.jwt_build()).post(
@@ -298,32 +299,45 @@ def test_permit(sample_app, groups):
     )
     assert response.status_code == 403
 
-    # user user_3 creates a child record, referencing parent_entity_id
-    response = get_api_client(sample_app, user_3.jwt_build()).post(
-        '/api/v1/entity/child_entity/',
-        json_data={
-            'data': {
-                'type': 'entity.child_entity',
-                'bs:action': 'add',
-                'attributes': {
-                    'child_name': 'Child test name 2',
-                    'child_description': 'Child test description 2',
-                    'child_is_active': False,
-                    'child_price': '25.19',
-                    'child_dt_approved': '2024-01-13T16:54:12Z',
-                },
-                'relationships': {
-                    'parent_entities': {
-                        'data': [
-                            {
-                                'id': parent_entity_id,
-                                'type': 'entity.parent_entity',
-                            }
-                        ],
-                    },
+    # parent_entities is the reverse side of the many-to-many relation of parent_entity:
+    # linking a child record changes the parent record, which user user_3 cannot change
+    child_payload = {
+        'data': {
+            'type': 'entity.child_entity',
+            'bs:action': 'add',
+            'attributes': {
+                'child_name': 'Child test name 2',
+                'child_description': 'Child test description 2',
+                'child_is_active': False,
+                'child_price': '25.19',
+                'child_dt_approved': '2024-01-13T16:54:12Z',
+            },
+            'relationships': {
+                'parent_entities': {
+                    'data': [
+                        {
+                            'id': parent_entity_id,
+                            'type': 'entity.parent_entity',
+                        }
+                    ],
                 },
             },
         },
+    }
+    response = get_api_client(sample_app, user_3.jwt_build()).post(
+        '/api/v1/entity/child_entity/', json_data=child_payload
+    )
+    assert response.status_code == 403
+    assert response.json()['errors'][0]['code'] == 'ERR_RELATION_ACCESS'
+
+    # once user_3 can change all parent records, user_3 creates a child record, referencing
+    # parent_entity_id
+    group = GroupPermission.objects.create(slug='parent_entity_change_all', **{to_attribute('name'): 'change'})
+    for slug in ('entity.parent_entity.item.view.all', 'entity.parent_entity.item.change.all'):
+        group.permissions.add(Permission.objects.get_or_create(slug=slug)[0])
+    role_user3.groups_permission.add(group)
+    response = get_api_client(sample_app, user_3.jwt_build()).post(
+        '/api/v1/entity/child_entity/', json_data=child_payload
     )
     assert response.status_code == 201
     child_entity_id = str(response.json()['data']['id'])
@@ -837,32 +851,34 @@ def test_filters_fields(sample_app, groups):
         },
     )
 
-    parent_wrong = factories.ParentEntityFactory.create(
-        name='Parent test name',
-    )
-
-    # in this case we cannot change the parent, because the original parent has is_active: False
-    response = get_api_client(sample_app, user_1.jwt_build()).patch(
-        f'/api/v1/entity/dependent_entity/{dependent_entity_id}/',
-        json_data={
-            'data': {
-                'id': dependent_entity_id,
-                'type': 'entity.dependent_entity',
-                'bs:action': 'change',
-                'relationships': {
-                    'parent_entity': {
-                        'data':
-                            {
+    def change_parent(parent):
+        return get_api_client(sample_app, user_1.jwt_build()).patch(
+            f'/api/v1/entity/dependent_entity/{dependent_entity_id}/',
+            json_data={
+                'data': {
+                    'id': dependent_entity_id,
+                    'type': 'entity.dependent_entity',
+                    'bs:action': 'change',
+                    'relationships': {
+                        'parent_entity': {
+                            'data': {
                                 'type': 'entity.parent_entity',
-                                'id': str(parent_wrong.id),
-                            }
-                        ,
+                                'id': str(parent.id),
+                            },
+                        },
                     },
                 },
             },
-        },
-    )
+        )
 
-    data = response.json()
+    # a parent the user cannot see cannot be referenced at all
+    response = change_parent(factories.ParentEntityFactory.create(name='Parent test name'))
+    assert response.status_code == 403
+    assert response.json()['errors'][0]['code'] == 'ERR_RELATION_ACCESS'
+
+    parent_wrong = factories.ParentEntityFactory.create(name='Parent test name', author=user_1)
+
+    # in this case we cannot change the parent, because the original parent has is_active: False
+    data = change_parent(parent_wrong).json()
 
     assert data['data']['relationships']['parent_entity']['data']['id'] == parent_id

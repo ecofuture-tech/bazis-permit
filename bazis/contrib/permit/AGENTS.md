@@ -67,9 +67,18 @@ class DocumentRouteSet(PermitRouteBase):
 
 - Every route of a protected model inherits `PermitRouteBase` (`permit.W002` lists the
   JSON:API routes that do not). A route of public data declares `permit_public = True`.
-- Enable `BS_BAZIS_PERMIT_RELATIONS_VIEW_CHECK=true` (`permit.W001`): otherwise an item can
-  reference objects the user cannot see, and a reverse relation can unlink objects the user
-  cannot change.
+- The core (Bazis 2.7) lets an item reference only the objects the user can view (a
+  reverse relation: link and unlink only the objects he can change), and `included` shows
+  only the objects he can view, by `restrict_queryset` of the default route of the related
+  model (`PermitRouteBase` for a protected model). Do not check the related objects
+  yourself; `relation_targets_check = False` turns it off for a route. A route without a
+  user (not a `UserRouteBase`) is checked as for an anonymous user unless the request user
+  is in `UserMixin.CTX_USER_REQUEST`.
+- `BS_BAZIS_PERMIT_RELATIONS_VIEW_CHECK` and `relations_view_check` are deprecated (no
+  effect; `relations_view_check = False` works as `relation_targets_check = False`) and
+  will be removed in 3.0; `permit.W001` reports the setting.
+- Override `restrict_queryset(qs, access_action, user=None, permit=None, **kwargs)` with
+  `**kwargs`: the core calls it on the class.
 - Permissions are cached per user for `BAZIS_PERMISSION_CACHE_EXPIRE` seconds and
   invalidated when roles, groups or permissions change through the ORM (`save`, `delete`,
   m2m); `QuerySet.update()` and `bulk_create()` do not invalidate the cache.
