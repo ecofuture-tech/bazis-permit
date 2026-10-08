@@ -97,34 +97,48 @@ class PermitModelMixin(UserMixin, PermitStructMixin):
     @classmethod
     def get_selector_fields(cls) -> dict[str, SelectorField]:
         """
-        Class method to get selector fields for the model, filtering only those related
-        to PermitSelectorMixin.
+        The selectors of the model: its relations to a PermitSelectorMixin model (the user,
+        an organization...), by name. A foreign key or one-to-one field, a many-to-many
+        field, or a reverse relation (by its accessor, the `related_name`) of a foreign key,
+        one-to-one or many-to-many field of the selector model.
         """
         fields = {}
-        for f in cls._meta.fields:
-            if model := getattr(f, 'related_model', None):
-                if isinstance(model, str):
-                    model = apps.get_model(model)
-                if issubclass(model, PermitSelectorMixin):
-                    fields[f.name] = SelectorField(
-                        name=f.name, label=str(f.verbose_name or f.name), model=model
-                    )
+        for name, rel in cls.get_fields_info().relations.items():
+            model = rel.related_model
+            if isinstance(model, str):
+                model = apps.get_model(model)
+            if issubclass(model, PermitSelectorMixin):
+                label = getattr(rel.model_field, 'verbose_name', None) or name
+                fields[name] = SelectorField(name=name, label=str(label), model=model)
         return fields
 
     @classmethod
     def selector_extending(cls, node: QueryComplexItem) -> QueryComplexItem:
         """
-        Class method to check if the model has the specified attributes.
+        Builds the condition of a selector from its value (the selector source of the user):
+        a foreign key matches the objects whose field references the value; a many-to-many
+        or reverse relation the objects the value is one of the related objects of
+        (`<selector>__pk`: an EXISTS subquery of the core filters, so an object matches
+        once). `autogen_<selector>_selectors` also matches the objects whose generated
+        selector array contains the value.
         """
         multi_value = node.value
         if not isinstance(multi_value, (list, set, tuple)):
             multi_value = [multi_value]
 
         kls, selector = cls.parse_selector(node.key)
+        *parts, _ = node.key.split(LOOKUP_SEP)
+
+        # a many-to-many or reverse relation: the value is one of the related objects; an
+        # EXISTS subquery, as a join would repeat the object for each related object
+        rel = kls.get_fields_info().relations.get(selector)
+        if rel and (rel.reverse or rel.is_m2m):
+            pks = [getattr(x, 'pk', x) for x in multi_value]
+            node.key = f'{node.key}{LOOKUP_SEP}pk'
+            node.value = pks if len(pks) > 1 else pks[0]
 
         attr_selector = ATTR_SELECTORS(selector)
         if attr_selector in kls.get_fields_info().attributes:
-            *parts, _ = node.key.split(LOOKUP_SEP)
             attr_prefix = LOOKUP_SEP.join(parts)
             if attr_prefix:
                 attr_prefix = f'{attr_prefix}__'

@@ -72,6 +72,22 @@ class ParentEntityRouteSet(PermitRouteBase, AuthorRouteBase):
         ),
     }
 
+class TeamRouteSet(PermitRouteBase):
+    """
+    Defines routing for the Team model.
+    """
+
+    model = apps.get_model('entity.Team')
+
+
+class MeetingRouteSet(PermitRouteBase, AuthorRouteBase):
+    """
+    Defines routing for the Meeting model.
+    """
+
+    model = apps.get_model('entity.Meeting')
+
+
 class BookmarkRouteSet(JsonapiRouteBase):
     """
     A route without a user (not a UserRouteBase) of a public model: the parent entities it

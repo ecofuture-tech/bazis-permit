@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from django.db import models
+from django.utils.translation import gettext_lazy as _
+
 from bazis.contrib.permit.models_abstract import (
     AnonymousUserPermitMixin,
     PermitSelectorMixin,
@@ -24,10 +27,17 @@ from bazis.core.models_abstract import JsonApiMixin, UuidMixin
 class User(UserPermitMixin, PermitSelectorMixin, UuidMixin, UserAbstract, JsonApiMixin):
     """
     Represents a user in the system, incorporating permissions, UUID, and user-
-    specific attributes.
+    specific attributes. The team of the user and the teams he watches are the reverse
+    relations `members` and `watchers` of the team, selectors of its permissions.
     """
 
-    pass
+    team = models.ForeignKey(
+        'entity.Team', verbose_name=_('Team'), on_delete=models.SET_NULL, null=True,
+        blank=True, related_name='members',
+    )
+    teams_watched = models.ManyToManyField(
+        'entity.Team', verbose_name=_('Watched teams'), related_name='watchers', blank=True
+    )
 
 
 class AnonymousUser(AnonymousUserPermitMixin, AnonymousUserAbstract):

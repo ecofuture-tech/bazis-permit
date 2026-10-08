@@ -180,6 +180,40 @@ class ParentEntity(
         verbose_name_plural = _('Parent entities')
 
 
+class Team(PermitModelMixin, DtMixin, UuidMixin, JsonApiMixin):
+    """
+    A team: its selectors are reverse relations of the user, `members` (the foreign key
+    `User.team`) and `watchers` (the many-to-many relation `User.teams_watched`).
+    """
+
+    name = models.CharField(_('Name'), max_length=255)
+
+    class Meta:
+        verbose_name = _('Team')
+        verbose_name_plural = _('Teams')
+
+
+class Meeting(PermitModelMixin, AuthorMixin, DtMixin, UuidMixin, JsonApiMixin):
+    """
+    A meeting: its selectors are the many-to-many relation `participants` and, through the
+    team, `team__members` and `team__watchers`.
+    """
+
+    title = models.CharField(_('Title'), max_length=255)
+    description = models.TextField(_('Description'), blank=True)
+    participants = models.ManyToManyField(
+        User, verbose_name=_('Participants'), related_name='meetings', blank=True
+    )
+    team = models.ForeignKey(
+        Team, verbose_name=_('Team'), on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='meetings',
+    )
+
+    class Meta:
+        verbose_name = _('Meeting')
+        verbose_name_plural = _('Meetings')
+
+
 class Bookmark(DtMixin, UuidMixin, JsonApiMixin):
     """
     A public model (not protected by permissions) whose route has no user: a bookmark of a
