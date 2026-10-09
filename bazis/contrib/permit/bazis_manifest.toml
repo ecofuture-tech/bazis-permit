@@ -55,7 +55,7 @@ check = "permit.W003"
 text = "the filter, sort and search of a request reach the fields the field permissions show the user in some object (Bazis 2.9, PermitRouteBase.query_fields): a field shown in only some objects, or in an object no field permission matches, stays reachable in all of them; hide it in the route `fields` if its values must not be found"
 
 [[pitfalls]]
-text = "the routes of an item answer 404 for an item the user cannot view (as for a missing one) and 403 for one he views but cannot change or delete; the lookup of the item (get_queryset_for_item: set_item, get_item) is restricted by restrict_queryset for view in the same query, so a custom action that takes its item with them answers the same; the read of the response after a write is not restricted (a write that makes the item invisible is 403)"
+text = "the routes of an item answer 404 for an item the user cannot view (as for a missing one) and 403 for one he views but cannot change or delete; the lookup of the item (get_queryset_for_item: set_item, get_item) is restricted by restrict_queryset for view in the same query, so a custom action that takes its item with them answers the same; the read of the response after a write is not restricted (a create or an update that makes the item invisible is 403 and rolled back; a statusy transit that hides it answers 204)"
 
 [[pitfalls]]
 text = "QuerySet.update() and bulk_create() on roles, groups and permissions do not invalidate the permission cache"

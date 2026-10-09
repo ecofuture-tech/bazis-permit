@@ -89,7 +89,8 @@ class DocumentRouteSet(PermitRouteBase):
   (`PermitRouteBase.get_queryset_for_item`, `restrict_queryset` for `view` in the same
   query) and answer the 404 of the core for a missing item, the same detail and queries;
   an item he views but cannot change or delete is 403. The read of the response after a
-  write is not restricted: a write that makes the item invisible is 403 and rolled back.
+  write is not restricted: a create or an update that makes the item invisible is 403 and
+  rolled back; a statusy transit that hides it is kept and answers 204.
 - Selector array fields (`autogen_<field>_selectors`, GIN) are generated only for the
   forward relations to `PermitSelectorMixin` models listed in `autogen_selectors_fields`;
   many-to-many and reverse selectors do not need them.

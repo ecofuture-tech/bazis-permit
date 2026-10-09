@@ -491,9 +491,9 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         item he cannot view is not found, the same 404 as a missing one (same detail, same
         queries); the routes answer 403 for an item he views but cannot change. A lookup of
         the item the route already holds (the read of the response after a create, an
-        update or a transit) is not restricted again: the response refuses an item the write
-        made invisible with 403, as the schema of the response requires the view
-        permission.
+        update or a transit) is not restricted again: the response of a create or an update
+        refuses an item the write made invisible with 403 (rolled back), as the schema of the
+        response requires the view permission; a statusy transit answers 204 instead.
         """
         qs = super().get_queryset_for_item(item_id, with_lock)
         # (the core has checked that the id can be a key)
