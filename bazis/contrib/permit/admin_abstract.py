@@ -69,22 +69,85 @@ class UserPermitAdminMixin:
         return format_html_join(mark_safe('<br/>'), '{}', ((role.name,) for role in user.roles.all()))
 
 
-class RoleAdminBase(M2mThroughMixin, DtAdminMixin, TranslatedFieldAdmin, admin.ModelAdmin):
+class ManagedAdminMixin:
+    """
+    The objects declared in the code (`managed`, bazis.contrib.permit.declare) are read-only
+    in the admin, besides the fields of `managed_editable`, and are not deleted while they
+    are declared; `migrate` would bring them back.
+    """
+
+    #: the fields of a managed object the admin still changes
+    managed_editable: tuple[str, ...] = ()
+
+    def is_declared(self, obj) -> bool:
+        from .declare import declared_slugs
+
+        return obj.managed and obj.slug in declared_slugs(self.model._meta.model_name)
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = (*super().get_readonly_fields(request, obj), 'managed')
+        if obj is not None and obj.managed:
+            opts = self.model._meta
+            fields += tuple(
+                f.name for f in (*opts.concrete_fields, *opts.many_to_many)
+                if f.editable and f.name not in self.managed_editable and f.name not in fields
+            )
+        return fields
+
+    def has_change_permission(self, request, obj=None):
+        if obj is not None and obj.managed and not self.managed_editable:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and self.is_declared(obj):
+            return False
+        return super().has_delete_permission(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        from .declare import declared_slugs
+
+        declared = declared_slugs(self.model._meta.model_name)
+        super().delete_queryset(request, queryset.exclude(managed=True, slug__in=declared))
+
+    def get_changelist_formset(self, request, **kwargs):
+        formset = super().get_changelist_formset(request, **kwargs)
+        editable = self.managed_editable
+
+        class ManagedFormSet(formset):
+            def _construct_form(self, i, **kwargs):
+                form = super()._construct_form(i, **kwargs)
+                if form.instance.managed:
+                    for name, field in form.fields.items():
+                        if name not in editable:
+                            field.disabled = True
+                return form
+
+        return ManagedFormSet
+
+
+class RoleAdminBase(
+    ManagedAdminMixin, M2mThroughMixin, DtAdminMixin, TranslatedFieldAdmin, admin.ModelAdmin
+):
     """
     Admin configuration for the Role model, including list display, editable fields,
-    and horizontal filters.
+    and horizontal filters. The admin attaches its own groups to a managed role.
     """
 
     list_display = (
         '__str__',
         'slug',
         'is_system',
+        'managed',
     )
     list_editable = ('is_system',)
     filter_horizontal = ('groups_permission',)
+    managed_editable = ('groups_permission', 'is_system')
 
 
-class GroupPermissionAdminBase(DtAdminMixin, TranslatedFieldAdmin, admin.ModelAdmin):
+class GroupPermissionAdminBase(
+    ManagedAdminMixin, DtAdminMixin, TranslatedFieldAdmin, admin.ModelAdmin
+):
     """
     Admin configuration for the GroupPermission model, including list display,
     editable fields, and horizontal filters.
@@ -95,6 +158,7 @@ class GroupPermissionAdminBase(DtAdminMixin, TranslatedFieldAdmin, admin.ModelAd
         'pk',
         'name',
         'slug',
+        'managed',
     )
     list_editable = (
         'slug',

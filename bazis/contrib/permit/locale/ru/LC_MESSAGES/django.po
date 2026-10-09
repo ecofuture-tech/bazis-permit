@@ -91,3 +91,6 @@ msgstr "Доступно для создания"
 #: routes_abstract.py:483
 msgid "Available actions"
 msgstr "Доступные действия"
+
+msgid "Managed by the code"
+msgstr "Управляется кодом"

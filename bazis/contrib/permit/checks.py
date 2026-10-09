@@ -17,7 +17,7 @@ Django system checks of bazis-permit (see `manage.py bazis_doctor`).
 """
 
 from django.conf import settings
-from django.core.checks import Warning, register
+from django.core.checks import Tags, Warning, register
 
 
 @register()
@@ -109,3 +109,58 @@ def check_routes_permit_model(app_configs, **kwargs):
         if issubclass(route_cls, PermitRouteBase)
         and not issubclass(route_cls.model, PermitStructMixin)
     ]
+
+
+@register()
+def check_declarations(app_configs, **kwargs):
+    """
+    The roles and permission groups declared in the `roles.py` modules: their slugs, the
+    groups of the roles, the models, selectors and fields of the permissions
+    (permit.E004, permit.E005) and the translations of their names (permit.W004).
+    """
+    from .declare import declaration_messages, declarations
+
+    return declaration_messages(*declarations())
+
+
+@register(Tags.database)
+def check_declarations_applied(app_configs, databases=None, **kwargs):
+    """
+    The database has the declared roles and groups (permit.W005) and no managed one that
+    is no longer declared (permit.W006). Warnings: `migrate` runs the database checks before
+    it applies the declarations. Skipped while migrations are not applied.
+    """
+    from .declare import (
+        apply_declarations,
+        declaration_messages,
+        declarations,
+        migrations_complete,
+        orphans,
+    )
+
+    messages = []
+    groups, roles = declarations()
+    if any(it.is_serious() for it in declaration_messages(groups, roles)):
+        # permit.E004, permit.E005
+        return []
+    for using in databases or ():
+        if not migrations_complete(using):
+            continue
+        if changes := apply_declarations(using, groups, roles, dry_run=True):
+            messages.append(
+                Warning(
+                    f'The database {using} differs from the declared roles: {"; ".join(changes)}.',
+                    hint='Run `manage.py migrate`: it applies the declarations.',
+                    id='permit.W005',
+                )
+            )
+        if found := orphans(using, groups, roles):
+            messages.append(
+                Warning(
+                    f'The database {using} has managed roles or groups that are not declared: '
+                    f'{", ".join(found)}.',
+                    hint='Declare them again in a roles.py module, or delete them in the admin.',
+                    id='permit.W006',
+                )
+            )
+    return messages

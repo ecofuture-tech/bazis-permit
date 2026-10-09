@@ -91,3 +91,6 @@ msgstr ""
 #: routes_abstract.py:483
 msgid "Available actions"
 msgstr ""
+
+msgid "Managed by the code"
+msgstr ""
