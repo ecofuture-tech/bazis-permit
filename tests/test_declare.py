@@ -18,11 +18,12 @@ and their application to the database after `migrate`.
 """
 
 import logging
+import threading
 
 from django.contrib.admin.sites import site
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
-from django.db import connection
+from django.db import connection, transaction
 from django.test.client import RequestFactory
 from django.test.utils import CaptureQueriesContext
 from django.utils.translation import gettext_lazy as _
@@ -137,6 +138,15 @@ def test_admin_groups_and_unmarked_objects_are_left():
 
     assert apply_declarations(groups=groups, roles=roles) == []
     assert groups_of('decl_viewer') == {'decl_viewers', 'admin_extra'}
+    # a declared (managed) group the admin attaches to a declared role is not one of its
+    # declared groups: it is removed
+    other = Group('decl_others', 'Others', [CHANGE])
+    apply_declarations(groups=[*groups, other], roles=roles)
+    RoleModel.objects.get(slug='decl_viewer').groups_permission.add(GroupPermission.objects.get(slug='decl_others'))
+    assert apply_declarations(groups=[*groups, other], roles=roles) == [
+        'role decl_viewer: groups_permission - decl_others'
+    ]
+    assert groups_of('decl_viewer') == {'decl_viewers', 'admin_extra'}
     assert permissions('admin_extra') == {CHANGE}
     assert not RoleModel.objects.get(slug='admin_role').managed
     assert groups_of('admin_role') == {'admin_extra'}
@@ -220,6 +230,43 @@ def test_post_migrate_skips_a_database_without_the_roles(monkeypatch):
 
 
 @pytest.mark.django_db(transaction=True)
+def test_concurrent_applications_wait_for_each_other():
+    """
+    A second `migrate` applying the declarations waits for the transaction of the first
+    (an advisory lock), then finds nothing to change.
+    """
+    groups = [Group('decl_viewers', 'Viewers', [VIEW])]
+    held, release, results = threading.Event(), threading.Event(), []
+
+    def first():
+        try:
+            with transaction.atomic():
+                results.append(('first', apply_declarations(groups=groups, roles=[])))
+                held.set()
+                release.wait(10)
+        finally:
+            connection.close()
+
+    def second():
+        try:
+            results.append(('second', apply_declarations(groups=groups, roles=[])))
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=first), threading.Thread(target=second)]
+    threads[0].start()
+    assert held.wait(10)
+    threads[1].start()
+    threads[1].join(1)
+    assert threads[1].is_alive(), 'the second application did not wait'
+    release.set()
+    for it in threads:
+        it.join(10)
+    assert [name for name, _changes in results] == ['first', 'second']
+    assert results[0][1] and results[1][1] == []
+
+
+@pytest.mark.django_db(transaction=True)
 def test_flush_applies_the_declarations_again():
     """
     `flush` (the end of every test with transaction=True) sends `post_migrate`: the declared
@@ -283,6 +330,9 @@ def test_the_checks_of_the_sample_pass():
         ('entity.parent_entity.item.view.child_entities__nobody', 'has no selector nobody'),
         ('entity.parent_entity.item.view.missing__author', 'has no relation missing'),
         ('entity.parent_entity.item.view.self', 'is not a PermitSelectorMixin'),
+        # auth.Group is a model of Django: no Bazis relations to follow
+        ('entity.parent_entity.item.view.author__groups__user', 'auth.Group is not a Bazis model'),
+        ('entity.parent_entity.item.view.author__groups__permissions__user', 'auth.Group is not a Bazis model'),
         ('entity.parent_entity.field.view.all.nothing.disable', 'has no field nothing'),
         ('entity.parent_entity.field.view.all.description', 'ends with'),
         ('entity.parent_entity.field.view.all.description.hide', "restriction 'hide'"),
@@ -369,9 +419,14 @@ def test_the_admin_keeps_managed_objects_read_only():
     assert 'slug' not in role_admin.get_readonly_fields(request, RoleModel(slug='new'))
     assert not role_admin.has_delete_permission(request, role)
 
-    # a managed object no longer declared can be deleted; a bulk delete skips the declared
+    # a managed object no longer declared is an ordinary one; a bulk delete skips the declared
     orphan = GroupPermission.objects.create(slug='decl_orphan', managed=True)
+    assert group_admin.has_change_permission(request, orphan)
+    assert 'slug' not in group_admin.get_readonly_fields(request, orphan)
     assert group_admin.has_delete_permission(request, orphan)
+    orphan_role = RoleModel.objects.create(slug='decl_orphan_role', managed=True)
+    assert 'slug' not in role_admin.get_readonly_fields(request, orphan_role)
+    assert role_admin.has_delete_permission(request, orphan_role)
     group_admin.delete_queryset(request, GroupPermission.objects.filter(slug__in=[group.slug, orphan.slug]))
     assert set(GroupPermission.objects.filter(slug__in=[group.slug, orphan.slug]).values_list('slug', flat=True)) == {
         group.slug

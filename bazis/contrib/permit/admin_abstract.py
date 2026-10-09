@@ -71,22 +71,26 @@ class UserPermitAdminMixin:
 
 class ManagedAdminMixin:
     """
-    The objects declared in the code (`managed`, bazis.contrib.permit.declare) are read-only
-    in the admin, besides the fields of `managed_editable`, and are not deleted while they
-    are declared; `migrate` would bring them back.
+    The objects declared in the code (`managed` and declared in a roles.py module,
+    bazis.contrib.permit.declare) are read-only in the admin, besides the fields of
+    `managed_editable`, and are not deleted: `migrate` would bring them back. A managed
+    object no longer declared is an ordinary object again.
     """
 
-    #: the fields of a managed object the admin still changes
+    #: the fields of a declared object the admin still changes
     managed_editable: tuple[str, ...] = ()
 
-    def is_declared(self, obj) -> bool:
+    def declared_slugs(self) -> set[str]:
         from .declare import declared_slugs
 
-        return obj.managed and obj.slug in declared_slugs(self.model._meta.model_name)
+        return declared_slugs(self.model._meta.model_name)
+
+    def is_declared(self, obj) -> bool:
+        return obj.managed and obj.slug in self.declared_slugs()
 
     def get_readonly_fields(self, request, obj=None):
         fields = (*super().get_readonly_fields(request, obj), 'managed')
-        if obj is not None and obj.managed:
+        if obj is not None and self.is_declared(obj):
             opts = self.model._meta
             fields += tuple(
                 f.name for f in (*opts.concrete_fields, *opts.many_to_many)
@@ -95,7 +99,7 @@ class ManagedAdminMixin:
         return fields
 
     def has_change_permission(self, request, obj=None):
-        if obj is not None and obj.managed and not self.managed_editable:
+        if obj is not None and not self.managed_editable and self.is_declared(obj):
             return False
         return super().has_change_permission(request, obj)
 
@@ -105,19 +109,17 @@ class ManagedAdminMixin:
         return super().has_delete_permission(request, obj)
 
     def delete_queryset(self, request, queryset):
-        from .declare import declared_slugs
-
-        declared = declared_slugs(self.model._meta.model_name)
-        super().delete_queryset(request, queryset.exclude(managed=True, slug__in=declared))
+        super().delete_queryset(request, queryset.exclude(managed=True, slug__in=self.declared_slugs()))
 
     def get_changelist_formset(self, request, **kwargs):
         formset = super().get_changelist_formset(request, **kwargs)
         editable = self.managed_editable
+        declared = self.declared_slugs()
 
         class ManagedFormSet(formset):
             def _construct_form(self, i, **kwargs):
                 form = super()._construct_form(i, **kwargs)
-                if form.instance.managed:
+                if form.instance.managed and form.instance.slug in declared:
                     for name, field in form.fields.items():
                         if name not in editable:
                             field.disabled = True

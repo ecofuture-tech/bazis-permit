@@ -100,8 +100,14 @@ text = "the declared roles reach the database only by migrate (or flush): after 
 check = "permit.W005"
 
 [[pitfalls]]
-text = "a managed role or group removed from roles.py is kept, with its permissions: delete it in the admin"
+text = "a managed role or group removed from roles.py is kept, with its permissions: it is an ordinary object in the admin again, delete it there"
 check = "permit.W006"
 
 [[pitfalls]]
 text = "to show more objects add a permission with another selector, not a union in restrict_queryset (its queryset also carries the field groups of the objects); an override narrows super().restrict_queryset(...)"
+
+[[pitfalls]]
+text = "a slug of roles.py that exists unmarked is taken over and synced: its permissions (a group) or managed groups (a role) that are not declared are revoked; a managed group the admin attaches to a declared role is removed by migrate"
+
+[[pitfalls]]
+text = "the declarations are applied after the last migration: on a fresh database a data migration cannot rely on the declared roles"

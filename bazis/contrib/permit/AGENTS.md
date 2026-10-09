@@ -73,18 +73,25 @@ ROLES = [Role('client', _('Client'), [CLIENT])]    # groups: Group objects or sl
   of the project are applied, in one transaction; applied again it writes nothing. The
   declared groups and roles are marked `managed`: the permissions of a managed group and
   the managed groups of a declared role are exactly the declared ones (removed from the
-  code = revoked). The groups the admin attached to a declared role, and the roles and
-  groups that are not declared, are left. A declared slug that exists unmarked is taken
-  over with a warning in the log. A managed object no longer declared is kept
-  (`permit.W006`); delete it in the admin.
+  code = revoked). The groups that are not declared that the admin attached to a declared
+  role, and the roles and groups that are not declared, are left; a declared group the
+  admin attaches to a declared role that does not list it is removed. A declared slug that
+  exists unmarked is taken over with a warning in the log, and from then on synced: its
+  permissions (or managed groups) that are not declared are revoked. A managed object no
+  longer declared is kept (`permit.W006`) and is an ordinary object in the admin again.
+  Concurrent `migrate` runs apply them one after the other (a PostgreSQL advisory lock).
+- A data migration of the product runs before the declarations are applied (they are
+  applied after the last migration): on a fresh database it cannot rely on the declared
+  roles or groups.
 - Names: English msgids (`gettext_lazy`); `name_en`/`name_ru` get the translations of the
   catalogs of the project (`permit.W004` lists the untranslated ones).
-- The admin shows managed objects read-only (a managed role still takes groups of the
-  admin) and does not delete declared ones.
-- Tests: the test database is migrated, so the declarations are there; a test with
+- The admin shows declared objects read-only (a declared role still takes groups of the
+  admin) and does not delete them.
+- Tests: the test database is migrated (also with `--reuse-db`: Django still runs
+  `migrate` on the kept database), so the declarations are there; a test with
   `transaction=True` gets them back after the flush. `bazis_test_utils` gives
-  `apply_declarations()` and the fixture `bazis_declared` (a database reused with
-  `--reuse-db`, or after deleting them in a test).
+  `apply_declarations()` and the fixture `bazis_declared`, for a test that changes the
+  declared rows itself.
 - `bazis.contrib.permit.declare.apply_declarations(using, groups=None, roles=None,
   dry_run=False)` returns the changes; `dry_run` only lists them.
 - Checks: `permit.E004` (a slug, a duplicate, a group of a role that is not declared),

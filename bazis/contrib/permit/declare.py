@@ -72,6 +72,9 @@ SLUG = re.compile(r'^[a-z0-9_-]+$')
 SELECTOR_NAME = re.compile(r'^[a-zA-Z_]+$')
 #: the restrictions of a field permission, besides `filter:<condition>`
 FIELD_RESTRICTS = {'enable', 'disable', 'readonly'}
+#: the key of the PostgreSQL advisory lock that serializes the application of the
+#: declarations (bazis-permit and bazis-statusy) by concurrent `migrate` runs
+ADVISORY_LOCK = 0x62617A6973  # 'bazis'
 
 
 @dataclass(frozen=True)
@@ -149,6 +152,18 @@ def untranslated(texts: list[str | Promise]) -> dict[str, list[str]]:
     return missing
 
 
+def lock(using: str = DEFAULT_DB_ALIAS) -> None:
+    """
+    In a transaction, waits for the other applications of the declarations (another
+    `migrate` of the same database) to end: a PostgreSQL advisory lock released at the end
+    of the transaction. Other databases have none.
+    """
+    connection = connections[using]
+    if connection.vendor == 'postgresql':
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT pg_advisory_xact_lock(%s)', [ADVISORY_LOCK])
+
+
 def migrations_complete(using: str = DEFAULT_DB_ALIAS) -> bool:
     """
     Whether the database has all the migrations of the project: the declarations are
@@ -204,6 +219,9 @@ def _selector_problem(model, selector: str) -> str | None:
         kls = rel.related_model
         if isinstance(kls, str):
             kls = apps.get_model(kls)
+        if not hasattr(kls, 'get_fields_info'):
+            # a model of Django or of another library: no Bazis relations to follow
+            return f'{kls._meta.label} is not a Bazis model: a selector cannot go through it'
     selectors = PermitModelMixin.get_selector_fields.__func__(kls)
     if name not in selectors:
         return (
@@ -419,6 +437,8 @@ def apply_declarations(
     sync = _Sync(using, dry_run)
 
     with transaction.atomic(using=using):
+        if not dry_run:
+            lock(using)
         slugs = {slug for _module, group in groups for slug in group.permissions}
         existing = set(
             permission_model.objects.using(using).filter(slug__in=slugs).values_list('slug', flat=True)
