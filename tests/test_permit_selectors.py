@@ -222,6 +222,26 @@ def test_selector_reverse_many_to_many(sample_app, no_selector_warnings):
 
 
 @pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('watched', [0, 1, 2])
+def test_selector_self_of_several_values(sample_app, no_selector_warnings, watched):
+    """
+    `self` of a selector model whose source has several values (`Team.get_selector_for_user`:
+    the teams the user watches): the user sees those objects. It found nothing, as the
+    source was taken for one object.
+    """
+    role = role_with('team_self', 'entity.team.item.view.self')
+    teams = [Team.objects.create(name=name) for name in ('Core', 'Docs', 'Ops')]
+    user = user_with('watcher', role)
+    user.teams_watched.add(*teams[:watched])
+
+    client = get_api_client(sample_app, user.jwt_build())
+    assert ids(client.get(URL_TEAM)) == sorted(str(team.id) for team in teams[:watched])
+    for team in teams[:watched]:
+        assert client.get(f'{URL_TEAM}{team.id}/').status_code == 200
+    assert client.get(f'{URL_TEAM}{teams[2].id}/').status_code == 404
+
+
+@pytest.mark.django_db(transaction=True)
 def test_selector_many_to_many_fields(sample_app, no_selector_warnings):
     """
     Field permissions by the selector `participants`: a participant who is not the author

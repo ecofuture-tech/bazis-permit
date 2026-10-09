@@ -88,7 +88,12 @@ def _selectors_perform(query: QueryComplex, user: 'User', struct: 'PermitStructM
                         if selector_value:
                             # extract according to model rules
                             if node.key == PERM_SELF:
-                                node.replace(key='pk', value=getattr(selector_value, 'pk', None))
+                                # the source of the selector is one object or several
+                                if isinstance(selector_value, list | set | tuple | QuerySet):
+                                    pks = [getattr(it, 'pk', it) for it in selector_value]
+                                else:
+                                    pks = getattr(selector_value, 'pk', selector_value)
+                                node.replace(key='pk', value=pks)
                             else:
                                 node.value = selector_value
                                 node = struct.selector_extending(node)

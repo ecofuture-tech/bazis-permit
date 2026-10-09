@@ -483,6 +483,26 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         ):
             raise JsonApi403Exception()
 
+    def get_queryset_for_item(self, item_id: str, with_lock: bool = False):
+        """
+        The item of a route of an item (retrieve, update, delete, the relationships and the
+        schema routes, the transits of bazis-statusy, custom actions using `set_item` or
+        `get_item`) is looked up among the objects the user can view, in the same query: an
+        item he cannot view is not found, the same 404 as a missing one (same detail, same
+        queries); the routes answer 403 for an item he views but cannot change. A lookup of
+        the item the route already holds (the read of the response after a create, an
+        update or a transit) is not restricted again: the response of a create or an update
+        refuses an item the write made invisible with 403 (rolled back), as the schema of the
+        response requires the view permission; a statusy transit answers 204 instead.
+        """
+        qs = super().get_queryset_for_item(item_id, with_lock)
+        # (the core has checked that the id can be a key)
+        if self.item is not None and self.item.pk == self.model._meta.pk.to_python(item_id):
+            return qs
+        visible = self.restrict_queryset(self.model.objects.all(), CrudAccessAction.VIEW)
+        # a subquery: the lock of the query (FOR NO KEY UPDATE) stays on the item alone
+        return qs.filter(pk__in=visible.values('pk'))
+
     @classmethod
     def permit_service_for(cls, user: User | AnonymousUser | None) -> PermitService:
         """
@@ -670,15 +690,15 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
                 actions.append(action.value)
         return actions
 
-    def update(self, *args, **kwargs) -> JsonApiMixin:
-        # in protected routes, anonymous users cannot create or update items
+    def update(self, item_id: str, *args, **kwargs) -> JsonApiMixin:
         """
         In protected routes, anonymous users cannot create or update items. Raises
-        JsonApi403Exception if the user is anonymous.
+        JsonApi403Exception if the user is anonymous (404 for an item he cannot view).
         """
         if self.inject.user.is_anonymous:
+            self.set_item(item_id)
             raise JsonApi403Exception
-        return super().update(*args, **kwargs)
+        return super().update(item_id, *args, **kwargs)
 
     def create(self, *args, **kwargs) -> JsonApiMixin:
         """
@@ -697,9 +717,9 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         JsonApi403Exception if the user is anonymous. Explicitly checks permissions for
         deletion.
         """
+        item = self.set_item(item_id)
         if self.inject.user.is_anonymous:
             raise JsonApi403Exception
-        item = self.set_item(item_id)
         # explicitly check permissions, as the schema is not built for deletion
         self.check_access(CrudAccessAction.DELETE, item)
         return super().destroy(item_id=item_id)

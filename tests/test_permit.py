@@ -130,11 +130,13 @@ def test_permit(sample_app, groups):
     # without authorization, you cannot view/patch/create/delete records on protected routes
     parent_entity = factories.ParentEntityFactory.create(child_entities=True)
 
+    # an item the user cannot view is not found, as a missing one (also for the writes);
+    # the creation is refused
     response = get_api_client(sample_app).get(f'/api/v1/entity/parent_entity/{parent_entity.id}/schema_retrieve/')
-    assert response.status_code == 403
+    assert response.status_code == 404
 
     response = get_api_client(sample_app).get(f'/api/v1/entity/parent_entity/{parent_entity.id}/')
-    assert response.status_code == 403
+    assert response.status_code == 404
 
     response = get_api_client(sample_app).patch(
         f'/api/v1/entity/parent_entity/{parent_entity.id}/',
@@ -149,7 +151,7 @@ def test_permit(sample_app, groups):
             },
         },
     )
-    assert response.status_code == 403
+    assert response.status_code == 404
 
     response = get_api_client(sample_app).post(
         '/api/v1/entity/parent_entity/',
@@ -172,7 +174,7 @@ def test_permit(sample_app, groups):
     response = get_api_client(sample_app).delete(
         f'/api/v1/entity/parent_entity/{str(parent_entity.id)}/'
     )
-    assert response.status_code == 403
+    assert response.status_code == 404
 
     user_1 = User.objects.create_user('user1', email='user1@site.com', password='weak_password_1')
     user_2 = User.objects.create_user('user2', email='user2@site.com', password='weak_password_2')
@@ -519,11 +521,12 @@ def test_permit(sample_app, groups):
             'entity.extended_entity',
         ]
 
-    # user user_2 cannot delete the record with extended_entity and dependent_entity
+    # user user_2 cannot delete the record with extended_entity and dependent_entity: he
+    # does not view extended_entity (not found), he views dependent_entity (forbidden)
     response = get_api_client(sample_app, user_2.jwt_build()).delete(
         f'/api/v1/entity/extended_entity/{extended_entity_id}/'
     )
-    assert response.status_code == 403
+    assert response.status_code == 404
 
     response = get_api_client(sample_app, user_2.jwt_build()).delete(
         f'/api/v1/entity/dependent_entity/{depended_entity_id}/'

@@ -27,8 +27,8 @@ entity.parent.field.change.all.children.filter:is_active=true  # relation may re
   triggers filled its selectors) and custom ones;
 - selector `all`, `self` (on a model that is itself a `PermitSelectorMixin`: the object
   is the one its `get_selector_for_user(user)` gives, the user himself on a user model,
-  `users.user.item.change.self`; known defect being fixed: a source that returns a list
-  matches nothing with `self`), `author`
+  `users.user.item.change.self`; a source of several objects, a list or a queryset,
+  matches each of them), `author`
   (bazis-author) or a relation linking the object to the user or his selector source
   (`org_owner`: a model that inherits `PermitSelectorMixin` and implements the classmethod
   `get_selector_for_user(user)`, returning an object or a list): a foreign key,
@@ -81,12 +81,22 @@ class DocumentRouteSet(PermitRouteBase):
 - `PermitRouteBase` filters the querysets, hides fields, builds the schemas per user, checks
   every CRUD action and the relationships endpoints, and adds the meta fields
   `for_change`, `for_delete`, `for_create`, `crud_actions`.
-- Anonymous users can only read (create, update and delete are 403), within the roles
-  marked `for_anonymous`.
+- Anonymous users can only read (create, update and delete are 403; update and delete
+  of an item they cannot view 404), within the roles marked `for_anonymous`.
+- An item the user cannot view does not exist for him: the routes of an item (retrieve,
+  update, delete, the relationships endpoints, `schema_retrieve`, `schema_update`, the
+  transits of bazis-statusy) look the item up among the objects he views
+  (`PermitRouteBase.get_queryset_for_item`, `restrict_queryset` for `view` in the same
+  query) and answer the 404 of the core for a missing item, the same detail and queries;
+  an item he views but cannot change or delete is 403. The read of the response after a
+  write is not restricted: a create or an update that makes the item invisible is 403 and
+  rolled back; a statusy transit that hides it is kept and answers 204.
 - Selector array fields (`autogen_<field>_selectors`, GIN) are generated only for the
   forward relations to `PermitSelectorMixin` models listed in `autogen_selectors_fields`;
   many-to-many and reverse selectors do not need them.
-- In custom actions check explicitly: `self.check_access(CrudAccessAction.VIEW, item)`.
+- In custom actions take the item with `self.set_item(item_id)` or `self.get_item(item_id)`
+  (404 for an item the user cannot view) and check the other operations explicitly:
+  `self.check_access(CrudAccessAction.CHANGE, item)` (403).
 - Settings: `BS_BAZIS_PERMISSION_CACHE_EXPIRE` (seconds, 7; dynamic, in the admin) and
   the deprecated `BS_BAZIS_PERMIT_RELATIONS_VIEW_CHECK` (`permit.W001`).
 - Field permissions in the API: `field.view.<selector>.<field>.disable` removes the field

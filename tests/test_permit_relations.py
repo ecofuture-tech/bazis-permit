@@ -316,18 +316,23 @@ def test_relationships_endpoint_checks_relations(sample_app, users):
 @pytest.mark.django_db(transaction=True)
 def test_relationships_endpoint_requires_change(sample_app, users):
     """
-    The relationships endpoints changed relations of any object, without permissions.
+    The relationships endpoints changed relations of any object, without permissions: 403
+    for an object the user views but cannot change, 404 for one he cannot view (the
+    anonymous user), as for a missing one.
     """
     owner, stranger = users
     parent = factories.ParentEntityFactory.create(author=owner, child_entities=False)
     foreign_dependent = factories.DependentEntityFactory.create(author=owner, parent_entity=parent)
     own_parent = factories.ParentEntityFactory.create(author=stranger, child_entities=False)
 
-    for client in (get_api_client(sample_app, stranger.jwt_build()), get_api_client(sample_app)):
+    for client, status in (
+        (get_api_client(sample_app, stranger.jwt_build()), 403),
+        (get_api_client(sample_app), 404),
+    ):
         response = client.patch(
             _relationship_url(foreign_dependent), json_data=_relationship_payload(own_parent)
         )
-        assert response.status_code in (401, 403)
+        assert response.status_code == status
     foreign_dependent.refresh_from_db()
     assert foreign_dependent.parent_entity_id == parent.id
 
