@@ -1,0 +1,11 @@
+# The translations of the sample: the names of the roles declared in entity/roles.py.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ru\n"
+
+msgid "Meetings of the guest teams"
+msgstr "Встречи гостевых команд"
+
+msgid "Guest"
+msgstr "Гость"

@@ -47,6 +47,7 @@ class DocumentRouteSet(PermitRouteBase):
   - [Permission System Levels](#permission-system-levels)
   - [Permission Format](#permission-format)
   - [Selectors](#selectors)
+  - [Roles in the Code](#roles-in-the-code)
 - [Usage](#usage)
   - [Creating Models](#creating-models)
   - [Creating Permissions](#creating-permissions)
@@ -330,6 +331,52 @@ invalidates the cache of all roles.
 
 An anonymous user matches no selector: a selector permission (e.g. `view.author`) of the
 role for anonymous users allows nothing.
+
+### Roles in the Code
+
+The roles and permission groups of an application are declared in its `roles.py`
+module (the lists `GROUPS` and `ROLES`); `migrate` applies them:
+
+```python
+# support/roles.py
+from django.utils.translation import gettext_lazy as _
+
+from bazis.contrib.permit.declare import Group, Role
+
+CLIENT = Group('tickets_client', _('Tickets of the client'), [
+    'support.ticket.item.view.author',
+    'support.ticket.item.add.all',
+])
+
+GROUPS = [CLIENT]
+ROLES = [Role('client', _('Client'), [CLIENT])]
+```
+
+- After `migrate` (and `flush`), once all the migrations of the project are applied, the
+  declared groups and roles exist and are marked `managed`, in one transaction. A second
+  `migrate` writes nothing.
+- The permissions of a managed group are exactly the declared ones: a permission removed
+  from the code is revoked. The managed groups of a declared role are exactly the declared
+  ones: the groups that are not declared that the admin attached to the role stay, but a
+  managed group the admin attached to it is removed by the next `migrate`.
+- Roles and groups that are not declared are left as they are. A declared slug that exists
+  unmarked is taken over (a warning in the log) and synced from then on: its permissions
+  that are not declared are revoked. A managed object no longer declared is kept:
+  `permit.W006` lists it; it is an ordinary object in the admin again (change or delete
+  it).
+- Concurrent `migrate` runs of a database apply the declarations one after the other (a
+  PostgreSQL advisory lock).
+- The declarations are applied after the last migration: on a fresh database a data
+  migration of the product runs before them and cannot rely on the declared roles.
+- The names are English msgids (`gettext_lazy`): `name_en` and `name_ru` get their
+  translations from the catalogs of the project (`locale/`); `permit.W004` lists the names
+  without a translation into a language of `LANGUAGES`.
+- The admin shows declared objects read-only (a declared role still takes the groups of
+  the admin) and does not delete them.
+- `manage.py bazis_doctor` checks the declarations: the slugs, the groups of the roles,
+  the model (a `PermitModelMixin`), the selector and the field of every permission
+  (`permit.E004`, `permit.E005`). `manage.py check --database default` also compares them
+  with the database (`permit.W005`, `permit.W006`).
 
 ### Selectors
 

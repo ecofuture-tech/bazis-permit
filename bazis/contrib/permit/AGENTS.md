@@ -48,9 +48,59 @@ selector other than `all`.
 
 The names of `Role` and `GroupPermission` (and of the statuses and transits of
 bazis-statusy) are translated fields with the columns `name_en` and `name_ru`, whatever
-the languages of the project: a data migration sets both
-(`Role.objects.create(slug='manager', name_en='Manager', name_ru='Менеджер')`); `name`
-reads the column of the active language, else the first of them in `LANGUAGES`.
+the languages of the project; `name` reads the column of the active language, else the
+first of them in `LANGUAGES`.
+
+## Roles in the code (`roles.py`)
+
+The roles and permission groups of a product are declared in the `roles.py` module of an
+application, not in data migrations:
+
+```python
+# support/roles.py
+from django.utils.translation import gettext_lazy as _
+from bazis.contrib.permit.declare import Group, Role
+
+CLIENT = Group('tickets_client', _('Tickets of the client'), [
+    'support.ticket.item.view.author.all',          # a model with statuses: .<status>
+    'support.ticket.field.view.all.all.assignee.disable',
+])
+GROUPS = [CLIENT]
+ROLES = [Role('client', _('Client'), [CLIENT])]    # groups: Group objects or slugs
+```
+
+- `migrate` applies them (`post_migrate`, also sent by `flush`) once all the migrations
+  of the project are applied, in one transaction; applied again it writes nothing. The
+  declared groups and roles are marked `managed`: the permissions of a managed group and
+  the managed groups of a declared role are exactly the declared ones (removed from the
+  code = revoked). The groups that are not declared that the admin attached to a declared
+  role, and the roles and groups that are not declared, are left; a declared group the
+  admin attaches to a declared role that does not list it is removed. A declared slug that
+  exists unmarked is taken over with a warning in the log, and from then on synced: its
+  permissions (or managed groups) that are not declared are revoked. A managed object no
+  longer declared is kept (`permit.W006`) and is an ordinary object in the admin again.
+  Concurrent `migrate` runs apply them one after the other (a PostgreSQL advisory lock).
+- A data migration of the product runs before the declarations are applied (they are
+  applied after the last migration): on a fresh database it cannot rely on the declared
+  roles or groups.
+- Names: English msgids (`gettext_lazy`); `name_en`/`name_ru` get the translations of the
+  catalogs of the project (`permit.W004` lists the untranslated ones).
+- The admin shows declared objects read-only (a declared role still takes groups of the
+  admin) and does not delete them.
+- Tests: the test database is migrated (also with `--reuse-db`: Django still runs
+  `migrate` on the kept database), so the declarations are there; a test with
+  `transaction=True` gets them back after the flush. `bazis_test_utils` gives
+  `apply_declarations()` and the fixture `bazis_declared`, for a test that changes the
+  declared rows itself.
+- `bazis.contrib.permit.declare.apply_declarations(using, groups=None, roles=None,
+  dry_run=False)` returns the changes; `dry_run` only lists them.
+- Checks: `permit.E004` (a slug, a duplicate, a group of a role that is not declared),
+  `permit.E005` (a permission: grammar, the model is a `PermitModelMixin`, the selector is
+  a relation to a `PermitSelectorMixin` model, the field exists, the restriction is
+  `enable`/`disable`/`readonly`/`filter:`), `permit.W004`; with a database
+  (`manage.py check --database default`, not `bazis_doctor`) `permit.W005` (the database
+  differs: migrate) and `permit.W006` (orphans). These are warnings: `migrate` runs the
+  database checks before it applies the declarations.
 
 ## Setup
 

@@ -7,7 +7,7 @@ summary = "permissions of users on objects, fields and relations, by roles"
 solves = [
     "users see and change only their own or their organization's objects",
     "users see the objects they take part in: a many-to-many or reverse relation to the user (participants, members)",
-    "roles and groups of permissions managed in the admin or the API",
+    "roles and groups of permissions declared in the code (roles.py) and applied by migrate, or managed in the admin or the API",
     "hide or protect fields per user",
     "restrict which objects a relation may reference",
 ]
@@ -33,6 +33,16 @@ use_when = "the user model: roles and the current role"
 name = "AnonymousUserPermitMixin"
 import = "bazis.contrib.permit.models_abstract.AnonymousUserPermitMixin"
 use_when = "the anonymous user model: the roles for anonymous users"
+
+[[extension_points]]
+name = "Group"
+import = "bazis.contrib.permit.declare.Group"
+use_when = "a permission group declared in the GROUPS of <app>/roles.py, applied by migrate"
+
+[[extension_points]]
+name = "Role"
+import = "bazis.contrib.permit.declare.Role"
+use_when = "a role declared in the ROLES of <app>/roles.py, applied by migrate"
 
 [[extension_points]]
 name = "PermitSelectorMixin"
@@ -74,7 +84,30 @@ text = "the routes of bazis-users do not check permissions: to restrict the user
 check = "permit.W002"
 
 [[pitfalls]]
-text = "the names of Role and GroupPermission are the columns name_en and name_ru whatever the languages of the project: set both in a data migration"
+text = "the names of Role and GroupPermission are the columns name_en and name_ru whatever the languages of the project: declare the roles in roles.py with English gettext_lazy names, migrate writes the translations of the catalogs of the project into both"
+check = "permit.W004"
+
+[[pitfalls]]
+text = "a declaration of roles.py with an invalid slug, a duplicate or a group of a role that is not declared stops migrate"
+check = "permit.E004"
+
+[[pitfalls]]
+text = "a declared permission names a PermitModelMixin model, a selector that is a relation to a PermitSelectorMixin model and an existing field; a model with statuses has the status segment after the selector"
+check = "permit.E005"
+
+[[pitfalls]]
+text = "the declared roles reach the database only by migrate (or flush): after a change of roles.py run migrate; `manage.py check --database default` lists the differences"
+check = "permit.W005"
+
+[[pitfalls]]
+text = "a managed role or group removed from roles.py is kept, with its permissions: it is an ordinary object in the admin again, delete it there"
+check = "permit.W006"
 
 [[pitfalls]]
 text = "to show more objects add a permission with another selector, not a union in restrict_queryset (its queryset also carries the field groups of the objects); an override narrows super().restrict_queryset(...)"
+
+[[pitfalls]]
+text = "a slug of roles.py that exists unmarked is taken over and synced: its permissions (a group) or managed groups (a role) that are not declared are revoked; a managed group the admin attaches to a declared role is removed by migrate"
+
+[[pitfalls]]
+text = "the declarations are applied after the last migration: on a fresh database a data migration cannot rely on the declared roles"

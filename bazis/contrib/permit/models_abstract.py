@@ -425,6 +425,9 @@ class BaseGroup(BasePermission):
         languages=LANGUAGES,
         attrsetter=translated_attrsetter,
     )
+    #: declared in a `roles.py` module of an application (bazis.contrib.permit.declare):
+    #: `migrate` keeps it as declared, the admin does not change it
+    managed = models.BooleanField(_('Managed by the code'), default=False, editable=False)
 
     class Meta:
         """

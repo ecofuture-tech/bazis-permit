@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from django.db.models.signals import post_migrate
 from django.utils.translation import gettext_lazy as _
 
 from bazis.core.utils.apps import BaseConfig
@@ -42,3 +43,7 @@ class PermitConfig(BaseConfig):
         PermitModelMixin.setup_selectors_fields()
 
         from . import checks  # noqa: F401  registers the system checks
+        from .declare import post_migrate_apply
+
+        # the roles of the roles.py modules, once per migrate or flush
+        post_migrate.connect(post_migrate_apply, sender=self, dispatch_uid='permit_declarations')

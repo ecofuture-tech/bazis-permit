@@ -95,3 +95,6 @@ msgstr ""
 #: contrib/permit/router.py:8
 msgid "Role model"
 msgstr ""
+
+msgid "Managed by the code"
+msgstr ""

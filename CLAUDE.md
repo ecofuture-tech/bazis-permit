@@ -11,6 +11,10 @@ calls it on the class (Bazis 2.7, `relations_access_check`); it must accept `**k
 and never fail without a user. `BAZIS_PERMIT_RELATIONS_VIEW_CHECK` and
 `relations_view_check` are deprecated (removal in 3.0).
 
+Roles and permission groups can be declared in the `roles.py` module of an application
+(`declare.py`): a `post_migrate` receiver applies them once all the migrations are applied
+(`managed` objects, full sync of their permissions), `checks.py` validates them.
+
 This is the security boundary of the applications: every change needs a test that shows
 both the allowed and the denied case (see `tests/test_permit_relations.py`). The sample
 project needs bazis-author (the `test` extra installs it).
