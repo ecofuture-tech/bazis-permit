@@ -375,8 +375,9 @@ ROLES = [Role('client', _('Client'), [CLIENT])]
   the admin) and does not delete them.
 - `manage.py bazis_doctor` checks the declarations: the slugs, the groups of the roles,
   the model (a `PermitModelMixin`), the selector and the field of every permission
-  (`permit.E004`, `permit.E005`). `manage.py check --database default` also compares them
-  with the database (`permit.W005`, `permit.W006`).
+  (`permit.E004`, `permit.E005`), and from bazis 2.13 also compares them with the
+  database it reaches (`permit.W005`, `permit.W006`); with an older core
+  `manage.py check --database default` does.
 
 ### Selectors
 
