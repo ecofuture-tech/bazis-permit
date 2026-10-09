@@ -433,9 +433,11 @@ def test_relationships_endpoint_filter_restricts_unlinking(sample_app):
     assert client.patch(url, json_data=payload(active)).status_code == 403
     assert set(parent.child_entities.all()) == {inactive, active}
 
+    # an id that cannot be a key: 400 before Bazis 2.11, then 422 ERR_VALIDATE (/data/0/id)
     invalid = {'data': [{'id': 'not-a-uuid', 'type': 'entity.child_entity'}]}
     response = client.client.request('DELETE', url, json=invalid, headers=client.headers)
-    assert response.status_code == 400
+    assert response.status_code in (400, 422)
+    assert set(parent.child_entities.all()) == {inactive, active}
 
     assert delete(active).status_code == 204
     assert set(parent.child_entities.all()) == {inactive}
