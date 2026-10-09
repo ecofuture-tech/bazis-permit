@@ -49,7 +49,7 @@ from django.apps import apps
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Warning
 from django.core.exceptions import ImproperlyConfigured
-from django.db import DEFAULT_DB_ALIAS, connections, transaction
+from django.db import DEFAULT_DB_ALIAS, connections, router, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.db.models import Q
 from django.utils import translation
@@ -473,6 +473,8 @@ def post_migrate_apply(sender, using=DEFAULT_DB_ALIAS, verbosity=1, **kwargs):
     The receiver of `post_migrate` (also sent by `flush`): applies the declarations once
     the migrations of the project are all applied.
     """
+    if not router.allow_migrate_model(using, apps.get_model('permit.Role')):
+        return
     if not migrations_complete(using):
         logger.info('Not all the migrations are applied: the declared roles are not applied.')
         return

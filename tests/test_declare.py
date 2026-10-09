@@ -211,6 +211,14 @@ def test_post_migrate_skips_an_incomplete_migration_plan(monkeypatch):
     assert applied == []
 
 
+def test_post_migrate_skips_a_database_without_the_roles(monkeypatch):
+    applied = []
+    monkeypatch.setattr(declare, 'apply_declarations', lambda using: applied.append(using) or [])
+    monkeypatch.setattr(declare.router, 'allow_migrate_model', lambda using, model: False)
+    declare.post_migrate_apply(sender=None, using='other')
+    assert applied == []
+
+
 @pytest.mark.django_db(transaction=True)
 def test_flush_applies_the_declarations_again():
     """
