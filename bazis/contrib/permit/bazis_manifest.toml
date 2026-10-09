@@ -96,7 +96,7 @@ text = "a declared permission names a PermitModelMixin model, a selector that is
 check = "permit.E005"
 
 [[pitfalls]]
-text = "the declared roles reach the database only by migrate (or flush): after a change of roles.py run migrate; `manage.py check --database default` lists the differences"
+text = "the declared roles reach the database only by migrate (or flush): after a change of roles.py run migrate; `manage.py bazis_doctor` (bazis 2.13; `manage.py check --database default` with an older core) lists the differences"
 check = "permit.W005"
 
 [[pitfalls]]

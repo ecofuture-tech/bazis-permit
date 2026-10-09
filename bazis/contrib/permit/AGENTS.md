@@ -97,9 +97,10 @@ ROLES = [Role('client', _('Client'), [CLIENT])]    # groups: Group objects or sl
 - Checks: `permit.E004` (a slug, a duplicate, a group of a role that is not declared),
   `permit.E005` (a permission: grammar, the model is a `PermitModelMixin`, the selector is
   a relation to a `PermitSelectorMixin` model, the field exists, the restriction is
-  `enable`/`disable`/`readonly`/`filter:`), `permit.W004`; with a database
-  (`manage.py check --database default`, not `bazis_doctor`) `permit.W005` (the database
-  differs: migrate) and `permit.W006` (orphans). These are warnings: `migrate` runs the
+  `enable`/`disable`/`readonly`/`filter:`), `permit.W004`; with a database (`bazis_doctor`
+  from bazis 2.13, against the database it reaches; with an older core only
+  `manage.py check --database default`) `permit.W005` (the database differs: migrate) and
+  `permit.W006` (orphans). These are warnings: `migrate` runs the
   database checks before it applies the declarations.
 
 ## Setup
