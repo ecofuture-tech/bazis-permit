@@ -65,3 +65,16 @@ text = "a selector names a relation of the model (a foreign key, a many-to-many 
 
 [[pitfalls]]
 text = "a many-to-many selector with a custom through model needs a unique constraint or index on the two foreign keys of the through model"
+
+[[pitfalls]]
+text = "permit_public = True only silences permit.W002: a route that is not a PermitRouteBase serves its get_queryset without permissions whatever it says, and a PermitRouteBase with it still checks them"
+
+[[pitfalls]]
+text = "the routes of bazis-users do not check permissions: to restrict the users, the user model inherits PermitModelMixin and the project registers its own PermitRouteBase route set of it (default_route = True)"
+check = "permit.W002"
+
+[[pitfalls]]
+text = "the names of Role and GroupPermission are the columns name_en and name_ru whatever the languages of the project: set both in a data migration"
+
+[[pitfalls]]
+text = "to show more objects add a permission with another selector, not a union in restrict_queryset (its queryset also carries the field groups of the objects); an override narrows super().restrict_queryset(...)"
