@@ -54,7 +54,7 @@ text = "BAZIS_PERMIT_RELATIONS_VIEW_CHECK is deprecated and has no effect: the c
 check = "permit.W001"
 
 [[pitfalls]]
-text = "a JSON:API route that does not inherit PermitRouteBase serves its model without permissions"
+text = "a JSON:API route that neither inherits PermitRouteBase nor overrides restrict_queryset (applied in its get_queryset) serves its whole model; permit_public = True only for public data"
 check = "permit.W002"
 
 [[pitfalls]]
@@ -77,7 +77,7 @@ text = "a selector names a relation of the model (a foreign key, a many-to-many 
 text = "a many-to-many selector with a custom through model needs a unique constraint or index on the two foreign keys of the through model"
 
 [[pitfalls]]
-text = "permit_public = True only silences permit.W002: a route that is not a PermitRouteBase serves its get_queryset without permissions whatever it says, and a PermitRouteBase with it still checks them"
+text = "permit_public = True only silences permit.W002: a route that is not a PermitRouteBase serves its get_queryset without permissions whatever it says, and a PermitRouteBase with it still checks them; a route that restricts its objects with its own restrict_queryset (the files of bazis-uploadable, the tasks of bazis-bg) needs no permit_public"
 
 [[pitfalls]]
 text = "the routes of bazis-users do not check permissions: to restrict the users, the user model inherits PermitModelMixin and the project registers its own PermitRouteBase route set of it (default_route = True)"

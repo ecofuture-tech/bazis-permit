@@ -45,9 +45,11 @@ def check_relations_view(app_configs, **kwargs):
 @register()
 def check_routes_permit(app_configs, **kwargs):
     """
-    A JSON:API route that is not a permission route serves its model without checking
-    the permissions. A route of public data declares `permit_public = True`. Runs when the
-    application is loaded (`manage.py bazis_doctor`).
+    A JSON:API route that does not restrict its objects serves its whole model: a route
+    restricts them with its `restrict_queryset`, the permissions for a permission route
+    (`PermitRouteBase`), its own rule for a route that overrides it (the files of
+    bazis-uploadable, the tasks of bazis-bg). A route of public data declares
+    `permit_public = True`. Runs when the application is loaded (`manage.py bazis_doctor`).
     """
     from bazis.core.introspect import loaded_app, route_sets
 
@@ -55,23 +57,23 @@ def check_routes_permit(app_configs, **kwargs):
         return []
 
     from bazis.core.routes_abstract.jsonapi import JsonapiRouteBase
-
-    from .routes_abstract import PermitRouteBase
+    from bazis.core.routes_abstract.jsonapi.mixins import restrict_queryset_override
 
     return [
         Warning(
-            f'The route {route_cls.__module__}.{route_cls.__qualname__} does not check '
-            'the permissions of the user.',
+            f'The route {route_cls.__module__}.{route_cls.__qualname__} does not restrict '
+            'its objects: it checks neither the permissions of the user nor a rule of its own.',
             hint=(
-                'Inherit it from bazis.contrib.permit.routes_abstract.PermitRouteBase, or set '
-                '`permit_public = True` on the route if its data is public.'
+                'Inherit it from bazis.contrib.permit.routes_abstract.PermitRouteBase, or '
+                'override restrict_queryset with your own rule (and apply it in get_queryset); '
+                'set `permit_public = True` only if the data of the route is public.'
             ),
             obj=route_cls,
             id='permit.W002',
         )
         for route_cls in route_sets(app)
         if issubclass(route_cls, JsonapiRouteBase)
-        and not issubclass(route_cls, PermitRouteBase)
+        and restrict_queryset_override(route_cls) is None
         and not getattr(route_cls, 'permit_public', False)
     ]
 
