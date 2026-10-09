@@ -25,6 +25,7 @@ from bazis.contrib.permit.checks import (
 )
 from bazis.contrib.permit.routes_abstract import PermitRouteBase
 from bazis.core.introspect import validate_manifest
+from bazis.core.routes_abstract.jsonapi import JsonapiRouteBase, RestrictedQsRouteMixin
 
 
 def test_manifest_is_valid():
@@ -50,6 +51,43 @@ def test_routes_without_permissions(sample_app):
     assert 'ParentEntityRouteSet' not in warnings
     # declared public
     assert 'RoleRoute' not in warnings
+
+
+def restricting_route(name, bases, **attrs):
+    # abstract: not initialized, so it does not become the default route of the model
+    return type(name, bases, {'abstract': True, 'model': Bookmark, **attrs})
+
+
+@pytest.mark.django_db
+def test_routes_that_restrict_their_objects(sample_app, monkeypatch):
+    """
+    A route that overrides `restrict_queryset` (as FileUploadRouteSet of bazis-uploadable
+    and BgRoute of bazis-bg), itself or in a base, restricts its objects: no permit.W002,
+    and no need for `permit_public`. A route that only inherits RestrictedQsRouteMixin
+    restricts nothing and is reported, as a plain JSON:API route.
+    """
+
+    def own_restrict_queryset(cls, qs, access_action, user=None, **kwargs):
+        return qs.none()
+
+    own = restricting_route(
+        'OwnRestrictRoute',
+        (RestrictedQsRouteMixin,),
+        restrict_queryset=classmethod(own_restrict_queryset),
+    )
+    inherited = restricting_route('InheritedRestrictRoute', (own,))
+    mixin_only = restricting_route('MixinOnlyRoute', (RestrictedQsRouteMixin,))
+    plain = restricting_route('PlainRoute', (JsonapiRouteBase,))
+    monkeypatch.setattr(
+        'bazis.core.introspect.route_sets',
+        lambda app: {route: [] for route in (own, inherited, mixin_only, plain)},
+    )
+
+    messages = check_routes_permit(None)
+    assert {(it.id, it.obj) for it in messages} == {
+        ('permit.W002', mixin_only),
+        ('permit.W002', plain),
+    }
 
 
 @pytest.mark.django_db

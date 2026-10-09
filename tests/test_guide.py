@@ -14,8 +14,9 @@
 
 """
 Statements of the guide (bazis/contrib/permit/AGENTS.md) not covered elsewhere: the
-selector `self`, the field permissions in the API, the names of the roles in a data
-migration, an override of `restrict_queryset`.
+selector `self`, the field permissions in the API (one field writable, the others
+read-only), the names of the roles in a data migration, an override of
+`restrict_queryset`.
 """
 
 from importlib.metadata import version
@@ -152,3 +153,34 @@ def test_read_only_fields_in_the_api(sample_app):
     assert response.json()['errors'][0]['code'] == 'ERR_RELATIONSHIP_READONLY'
     meeting.refresh_from_db()
     assert meeting.team_id is None
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.usefixtures('no_selector_warnings')
+def test_one_field_writable_the_others_read_only(sample_app):
+    """
+    `field.change.<selector>.__all__.readonly` with `<field>.enable`: the restriction of the
+    field replaces the one of `__all__`, so an update changes only that field.
+    """
+    from entity.models import Meeting
+
+    from tests.test_permit_selectors import URL_MEETING, meeting_patch
+
+    role = role_with(
+        'meeting_description_only',
+        'entity.meeting.item.view.author',
+        'entity.meeting.item.change.author',
+        'entity.meeting.field.change.author.__all__.readonly',
+        'entity.meeting.field.change.author.description.enable',
+    )
+    author = user_with('author', role)
+    meeting = Meeting.objects.create(title='Planning', author=author)
+    client = get_api_client(sample_app, author.jwt_build())
+
+    response = client.patch(
+        f'{URL_MEETING}{meeting.id}/',
+        json_data=meeting_patch(meeting, title='Renamed', description='Notes'),
+    )
+    assert response.status_code == 200, response.content
+    meeting.refresh_from_db()
+    assert (meeting.title, meeting.description) == ('Planning', 'Notes')

@@ -155,6 +155,28 @@ class DocumentRouteSet(PermitRouteBase):
   marks it `readOnly: true` in `schema_update` of the item (the attributes schema in
   `$defs`), an update ignores it (200, the value unchanged) and its relationships
   endpoints answer 403 `ERR_RELATIONSHIP_READONLY` (bazis 2.8.1; a 500 before).
+  `__all__` in place of the field is every field of the schema; a restriction of the
+  field itself replaces the one of `__all__` of the same kind (availability: `enable`,
+  `readonly`, `writeonly`, `disable`), and of the permissions of the user that match an
+  object, `enable` wins over `readonly`/`writeonly`/`disable` and `readonly` over
+  `disable`. One field writable, the others read-only (a model with statuses has the
+  status segment, `client.all.__all__.readonly`):
+
+  ```python
+  'service.act.field.change.client.__all__.readonly',
+  'service.act.field.change.client.confirmed.enable',
+  ```
+- A selector source (`client` above, `Act.client = ForeignKey(Client)`): the model
+  inherits `PermitSelectorMixin` and implements the classmethod
+  `get_selector_for_user(user)`; a false value (no client) makes the permission match
+  nothing:
+
+  ```python
+  class Client(PermitSelectorMixin, ...):
+      @classmethod
+      def get_selector_for_user(cls, user):
+          return user.client          # an object, a list or a queryset; None: nothing
+  ```
 - The users: the routes of bazis-users do not check permissions (`permit.W002` lists
   them). To restrict them, the user model also inherits `PermitModelMixin` (else
   `permit.W003`) and the project registers its own route set of it, a `PermitRouteBase`
@@ -166,6 +188,12 @@ class DocumentRouteSet(PermitRouteBase):
   `default_route = True` on it). `permit.W002` reports it; `permit_public = True` on the
   route only says that its data is public and silences the warning, it changes nothing
   else.
+- A route that restricts its objects by a rule of its own overrides `restrict_queryset`
+  (of `RestrictedQsRouteMixin`) and applies it in its `get_queryset` (the core does not
+  apply it to the list and items of the route): `permit.W002` skips it (bazis-permit
+  2.10), with no `permit_public`. So are the routes of bazis-uploadable (the files of the
+  user) and bazis-bg (the tasks of the user) and their subclasses. The check sees only
+  the override, not that `get_queryset` uses it.
 - To see more objects, add a permission (another selector), not code. An override of
   `restrict_queryset` keeps the permissions and narrows them:
 
@@ -180,8 +208,9 @@ class DocumentRouteSet(PermitRouteBase):
 
 ## Rules
 
-- Every route of a protected model inherits `PermitRouteBase` (`permit.W002` lists the
-  JSON:API routes that do not). A route of public data declares `permit_public = True`.
+- Every route of a protected model inherits `PermitRouteBase` or restricts its objects
+  with its own `restrict_queryset` (`permit.W002` lists the JSON:API routes that do
+  neither). Only a route of public data declares `permit_public = True`.
 - The model of a `PermitRouteBase` route is a `PermitModelMixin` (a `PermitStructMixin`):
   with another model the route and the relations into it fail with `AttributeError` as
   soon as the user has a permission on the model (`permit.W003`, a warning).
