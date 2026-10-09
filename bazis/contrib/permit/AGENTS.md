@@ -85,13 +85,16 @@ class DocumentRouteSet(PermitRouteBase):
   of an item they cannot view 404), within the roles marked `for_anonymous`.
 - An item the user cannot view does not exist for him: the routes of an item (retrieve,
   update, delete, the relationships endpoints, `schema_retrieve`, `schema_update`, the
-  transits of bazis-statusy) answer 404 `Item not found`, as for a missing item
-  (`PermitRouteBase.set_item`); an item he views but cannot change or delete is 403.
+  transits of bazis-statusy) look the item up among the objects he views
+  (`PermitRouteBase.get_queryset_for_item`, `restrict_queryset` for `view` in the same
+  query) and answer the 404 of the core for a missing item, the same detail and queries;
+  an item he views but cannot change or delete is 403. The read of the response after a
+  write is not restricted: a write that makes the item invisible is 403 and rolled back.
 - Selector array fields (`autogen_<field>_selectors`, GIN) are generated only for the
   forward relations to `PermitSelectorMixin` models listed in `autogen_selectors_fields`;
   many-to-many and reverse selectors do not need them.
-- In custom actions take the item with `self.set_item(item_id)` (404 for an item the user
-  cannot view) and check the other operations explicitly:
+- In custom actions take the item with `self.set_item(item_id)` or `self.get_item(item_id)`
+  (404 for an item the user cannot view) and check the other operations explicitly:
   `self.check_access(CrudAccessAction.CHANGE, item)` (403).
 - Settings: `BS_BAZIS_PERMISSION_CACHE_EXPIRE` (seconds, 7; dynamic, in the admin) and
   the deprecated `BS_BAZIS_PERMIT_RELATIONS_VIEW_CHECK` (`permit.W001`).

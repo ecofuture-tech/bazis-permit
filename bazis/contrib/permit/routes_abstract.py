@@ -25,7 +25,7 @@ from django.db.models import Case, IntegerField, QuerySet, Value, When
 from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends
 
 from pydantic import BaseModel
 
@@ -483,23 +483,25 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         ):
             raise JsonApi403Exception()
 
-    def set_item(self, item_id: str, with_lock: bool = False, is_force: bool = False) -> JsonApiMixin:
+    def get_queryset_for_item(self, item_id: str, with_lock: bool = False):
         """
         The item of a route of an item (retrieve, update, delete, the relationships and the
-        schema routes, the transits of bazis-statusy): an item the user cannot view does not
-        exist for him, 404 as a missing one, so that the answer does not tell that it
-        exists; the routes answer 403 for an item he views but cannot change. The check is
-        made on a handler of its own: the cached one would keep the values of the item
-        before a write of the request (a transit that hides it).
+        schema routes, the transits of bazis-statusy, custom actions using `set_item` or
+        `get_item`) is looked up among the objects the user can view, in the same query: an
+        item he cannot view is not found, the same 404 as a missing one (same detail, same
+        queries); the routes answer 403 for an item he views but cannot change. A lookup of
+        the item the route already holds (the read of the response after a create, an
+        update or a transit) is not restricted again: the response refuses an item the write
+        made invisible with 403, as the schema of the response requires the view
+        permission.
         """
-        previous = self.item
-        item = super().set_item(item_id, with_lock=with_lock, is_force=is_force)
-        if item is not previous:
-            permit = self.inject.permit
-            if not permit.handler_class(permit, CrudAccessAction.VIEW, item).check_access():
-                self.item = None
-                raise HTTPException(status_code=404, detail='Item not found')
-        return item
+        qs = super().get_queryset_for_item(item_id, with_lock)
+        # (the core has checked that the id can be a key)
+        if self.item is not None and self.item.pk == self.model._meta.pk.to_python(item_id):
+            return qs
+        visible = self.restrict_queryset(self.model.objects.all(), CrudAccessAction.VIEW)
+        # a subquery: the lock of the query (FOR NO KEY UPDATE) stays on the item alone
+        return qs.filter(pk__in=visible.values('pk'))
 
     @classmethod
     def permit_service_for(cls, user: User | AnonymousUser | None) -> PermitService:

@@ -20,6 +20,8 @@ but cannot change or delete is still 403.
 
 import uuid
 
+from django.db.backends.utils import CursorWrapper
+
 import pytest
 from bazis_test_utils.utils import get_api_client
 from entity.models import ParentEntity
@@ -36,12 +38,17 @@ User = get_user_model()
 URL = '/api/v1/entity/parent_entity/'
 
 
-def user_with(name: str, *slugs: str) -> User:
+def role_with(name: str, *slugs: str, **kwargs) -> Role:
     group = GroupPermission.objects.create(slug=name, **{to_attribute('name'): name})
     for slug in slugs:
         group.permissions.add(Permission.objects.get_or_create(slug=slug)[0])
-    role = Role.objects.create(slug=name, **{to_attribute('name'): name})
+    role = Role.objects.create(slug=name, **{to_attribute('name'): name}, **kwargs)
     role.groups_permission.add(group)
+    return role
+
+
+def user_with(name: str, *slugs: str) -> User:
+    role = role_with(name, *slugs)
     user = User.objects.create_user(name, password='weak_password_5')
     user.roles.add(role)
     # a trigger sets the current role
@@ -128,3 +135,110 @@ def test_item_the_user_cannot_view_is_not_found(sample_app):
         response = send(client, method, url, payload)
         assert response.status_code in (200, 204), (method, url, response.text)
     assert not ParentEntity.objects.filter(pk=item.pk).exists()
+
+
+OWNER_PERMS = (
+    'entity.parent_entity.item.add.all',
+    'entity.parent_entity.item.view.author',
+    'entity.parent_entity.item.change.author',
+    'entity.parent_entity.item.delete.author',
+)
+
+
+@pytest.fixture
+def queries(monkeypatch):
+    """The SQL of the requests (all threads: the test client runs the application in one)."""
+    executed = []
+    execute = CursorWrapper.execute
+
+    def counting(self, sql, params=None):
+        executed.append(sql)
+        return execute(self, sql, params)
+
+    monkeypatch.setattr(CursorWrapper, 'execute', counting)
+    return executed
+
+
+@pytest.mark.django_db(transaction=True)
+def test_invisible_is_answered_as_missing(sample_app, queries):
+    """
+    The same detail in the language of the request and the same number of queries for an
+    item the user cannot view and for a missing one: nothing tells them apart.
+    """
+    owner = user_with('owner', *OWNER_PERMS)
+    stranger = user_with('stranger', *OWNER_PERMS)
+    item = factories.ParentEntityFactory.create(author=owner, child_entities=False)
+    client = get_api_client(sample_app, stranger.jwt_build())
+    client.headers['Accept-Language'] = 'ru'
+
+    def request(method, item_id):
+        payload = {'data': {'id': str(item_id), 'type': 'entity.parent_entity',
+                            'attributes': {'name': 'Changed'}}} if method == 'PATCH' else None
+        # a first request warms the caches (the role, the schemas)
+        send(client, method, f'{URL}{item_id}/', payload)
+        queries.clear()
+        response = send(client, method, f'{URL}{item_id}/', payload)
+        return response.status_code, error_of(response), len(queries)
+
+    for method in ('GET', 'PATCH', 'DELETE'):
+        missing = request(method, uuid.uuid4())
+        invisible = request(method, item.id)
+        assert missing[0] == 404, method
+        assert invisible == missing, method
+
+
+@pytest.mark.django_db(transaction=True)
+def test_write_that_hides_the_item_is_refused(sample_app):
+    """
+    A create or an update that makes the item invisible to its author is refused with 403
+    and rolled back, as before: the read of the response is not a lookup of an item.
+    """
+    user = user_with(
+        'active_only',
+        'entity.parent_entity.item.add.all',
+        'entity.parent_entity.item.view.author=__selector__&is_active=true',
+        'entity.parent_entity.item.change.author',
+    )
+    client = get_api_client(sample_app, user.jwt_build())
+
+    def body(is_active, item=None):
+        data = {'type': 'entity.parent_entity', 'attributes': {'name': 'Item', 'is_active': is_active}}
+        if item:
+            data['id'] = str(item.id)
+        return {'data': data}
+
+    response = client.post(URL, json_data=body(False))
+    assert response.status_code == 403, response.text
+    assert not ParentEntity.objects.exists()
+
+    response = client.post(URL, json_data=body(True))
+    assert response.status_code == 201, response.text
+    item = ParentEntity.objects.get()
+
+    response = client.patch(f'{URL}{item.id}/', json_data=body(False, item))
+    assert response.status_code == 403, response.text
+    item.refresh_from_db()
+    assert item.is_active is True
+
+
+@pytest.mark.django_db(transaction=True)
+def test_anonymous_writes(sample_app):
+    """
+    The anonymous user does not write: 403 on an item he views, 404 on one he does not
+    view (as on a missing one).
+    """
+    role_with('anonymous', 'entity.parent_entity.item.view.all', for_anonymous=True)
+    owner = user_with('owner', *OWNER_PERMS)
+    item = factories.ParentEntityFactory.create(author=owner, child_entities=False)
+    client = get_api_client(sample_app)
+    child = factories.ChildEntityFactory.create()
+
+    for method, url, payload in item_requests(item.id, child):
+        if method != 'GET':
+            assert send(client, method, url, payload).status_code == 403, (method, url)
+
+    Role.objects.filter(for_anonymous=True).delete()
+    client = get_api_client(sample_app)
+    for method, url, payload in item_requests(item.id, child):
+        assert send(client, method, url, payload).status_code == 404, (method, url)
+    assert ParentEntity.objects.filter(pk=item.pk).exists()
