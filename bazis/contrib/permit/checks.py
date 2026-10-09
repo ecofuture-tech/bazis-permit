@@ -64,8 +64,9 @@ def check_routes_permit(app_configs, **kwargs):
             f'The route {route_cls.__module__}.{route_cls.__qualname__} does not restrict '
             'its objects: it checks neither the permissions of the user nor a rule of its own.',
             hint=(
-                'Inherit it from bazis.contrib.permit.routes_abstract.PermitRouteBase, or set '
-                '`permit_public = True` on the route if its data is public.'
+                'Inherit it from bazis.contrib.permit.routes_abstract.PermitRouteBase, or '
+                'override restrict_queryset with your own rule (and apply it in get_queryset); '
+                'set `permit_public = True` only if the data of the route is public.'
             ),
             obj=route_cls,
             id='permit.W002',

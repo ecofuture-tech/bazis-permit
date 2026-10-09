@@ -157,9 +157,8 @@ class DocumentRouteSet(PermitRouteBase):
   endpoints answer 403 `ERR_RELATIONSHIP_READONLY` (bazis 2.8.1; a 500 before).
   `__all__` in place of the field is every field of the schema; a restriction of the
   field itself replaces the one of `__all__` of the same kind (availability: `enable`,
-  `readonly`, `writeonly`, `disable`), and of the permissions of the user that match an
-  object, `enable` wins over `readonly`/`writeonly`/`disable` and `readonly` over
-  `disable`. One field writable, the others read-only (a model with statuses has the
+  `readonly`, `disable`), and of the permissions of the user that match an object,
+  `enable` wins over `readonly` and `disable`, and `readonly` over `disable`. One field writable, the others read-only (a model with statuses has the
   status segment, `client.all.__all__.readonly`):
 
   ```python
