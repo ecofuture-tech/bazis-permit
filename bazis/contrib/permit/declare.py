@@ -46,8 +46,7 @@ from dataclasses import dataclass
 from importlib import import_module
 
 from django.apps import apps
-from django.conf import settings
-from django.core.checks import CheckMessage, Error, Warning
+from django.core.checks import CheckMessage, Error
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DEFAULT_DB_ALIAS, connections, router, transaction
 from django.db.migrations.executor import MigrationExecutor
@@ -133,23 +132,6 @@ def translations(text: str | Promise, field: str = 'name') -> dict[str, str]:
         with translation.override(language):
             values[to_attribute(field, language)] = str(text)
     return values
-
-
-def untranslated(texts: list[str | Promise]) -> dict[str, list[str]]:
-    """
-    The texts that have no translation in a language of LANGUAGES other than English (the
-    language of the msgids), by language.
-    """
-    with translation.override(None):
-        sources = [str(it) for it in texts]
-    missing = {}
-    for language, _name in settings.LANGUAGES:
-        if language.lower().split('-')[0] == 'en':
-            continue
-        with translation.override(language):
-            if names := [src for src, text in zip(sources, texts, strict=True) if str(text) == src]:
-                missing[language] = names
-    return missing
 
 
 def lock(using: str = DEFAULT_DB_ALIAS) -> None:
@@ -291,8 +273,8 @@ def _name_problem(it) -> str | None:
 
 def declaration_messages(groups, roles) -> list[CheckMessage]:  # noqa: C901
     """
-    The problems of the declarations (the system checks permit.E004, permit.E005 and
-    permit.W004); `apply_declarations` refuses declarations with errors.
+    The problems of the declarations (the system checks permit.E004 and permit.E005);
+    `apply_declarations` refuses declarations with errors.
     """
     messages = []
 
@@ -337,20 +319,6 @@ def declaration_messages(groups, roles) -> list[CheckMessage]:  # noqa: C901
                     f'The permission {slug} of the group {group.slug}: {problem}.', module,
                     id='permit.E005',
                 )
-
-    names = [
-        it.name for _module, it in [*groups, *roles]
-        if isinstance(it, (Group, Role)) and not _name_problem(it)
-    ]
-    for language, missing in untranslated(names).items():
-        messages.append(
-            Warning(
-                f'The names of declared roles or groups have no translation into {language}: '
-                f'{", ".join(missing)}.',
-                hint='Translate them in the locale of the project (makemessages, compilemessages).',
-                id='permit.W004',
-            )
-        )
     return messages
 
 

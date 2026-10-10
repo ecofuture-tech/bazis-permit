@@ -16,8 +16,10 @@ from django.apps import apps
 
 from bazis.contrib.author.routes_abstract import AuthorRouteBase
 from bazis.contrib.permit.routes_abstract import PermitRouteBase
+from bazis.core.routes_abstract.initial import http_get, http_post
 from bazis.core.routes_abstract.jsonapi import JsonapiRouteBase
-from bazis.core.schemas import SchemaField, SchemaFields
+from bazis.core.schemas import CrudAccessAction, SchemaField, SchemaFields
+from bazis.core.throttle import throttle
 
 
 class ChildEntityRouteSet(PermitRouteBase, AuthorRouteBase):
@@ -82,6 +84,34 @@ class TeamRouteSet(PermitRouteBase):
     fields = {
         None: SchemaFields(include={'meetings': None}),
     }
+
+    # custom actions: closed to anonymous users unless public, with the permission they
+    # declare (access_action) on the model or on the item
+
+    @http_get('/count/', access_action=CrudAccessAction.VIEW)
+    def action_count(self, **kwargs) -> int:
+        return self.restrict_queryset(self.model.objects.all(), CrudAccessAction.VIEW).count()
+
+    @http_get('/motto/', public=True)
+    def action_motto(self, **kwargs) -> str:
+        return 'Together'
+
+    @http_get(
+        '/digest/', access_action=CrudAccessAction.VIEW, dependencies=[throttle('1/minute')]
+    )
+    def action_digest(self, **kwargs) -> int:
+        return self.restrict_queryset(self.model.objects.all(), CrudAccessAction.VIEW).count()
+
+    @http_post('/{item_id}/rename/', access_action=CrudAccessAction.CHANGE)
+    def action_rename(self, item_id: str, name: str, **kwargs) -> str:
+        item = self.set_item(item_id)
+        item.name = name
+        item.save()
+        return item.name
+
+    @http_get('/{item_id}/card/')
+    def action_card(self, item_id: str, **kwargs) -> str:
+        return self.set_item(item_id).name
 
 
 class MeetingRouteSet(PermitRouteBase, AuthorRouteBase):

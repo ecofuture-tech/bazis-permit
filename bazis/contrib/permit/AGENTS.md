@@ -84,7 +84,8 @@ ROLES = [Role('client', _('Client'), [CLIENT])]    # groups: Group objects or sl
   applied after the last migration): on a fresh database it cannot rely on the declared
   roles or groups.
 - Names: English msgids (`gettext_lazy`); `name_en`/`name_ru` get the translations of the
-  catalogs of the project (`permit.W004` lists the untranslated ones).
+  catalogs of the project (`manage.py bazis_messages status` lists the untranslated ones;
+  `permit.W004` is removed in bazis-permit 2.11).
 - The admin shows declared objects read-only (a declared role still takes groups of the
   admin) and does not delete them.
 - Tests: the test database is migrated (also with `--reuse-db`: Django still runs
@@ -97,7 +98,7 @@ ROLES = [Role('client', _('Client'), [CLIENT])]    # groups: Group objects or sl
 - Checks: `permit.E004` (a slug, a duplicate, a group of a role that is not declared),
   `permit.E005` (a permission: grammar, the model is a `PermitModelMixin`, the selector is
   a relation to a `PermitSelectorMixin` model, the field exists, the restriction is
-  `enable`/`disable`/`readonly`/`filter:`), `permit.W004`; with a database (`bazis_doctor`
+  `enable`/`disable`/`readonly`/`filter:`); with a database (`bazis_doctor`
   from bazis 2.13, against the database it reaches; with an older core only
   `manage.py check --database default`) `permit.W005` (the database differs: migrate) and
   `permit.W006` (orphans). These are warnings: `migrate` runs the
@@ -145,9 +146,8 @@ class DocumentRouteSet(PermitRouteBase):
 - Selector array fields (`autogen_<field>_selectors`, GIN) are generated only for the
   forward relations to `PermitSelectorMixin` models listed in `autogen_selectors_fields`;
   many-to-many and reverse selectors do not need them.
-- In custom actions take the item with `self.set_item(item_id)` or `self.get_item(item_id)`
-  (404 for an item the user cannot view) and check the other operations explicitly:
-  `self.check_access(CrudAccessAction.CHANGE, item)` (403).
+- Custom actions (routes of kind `other` of the `http_*` decorators, see below) are
+  closed to anonymous users and check the permission they declare.
 - Settings: `BS_BAZIS_PERMISSION_CACHE_EXPIRE` (seconds, 7; dynamic, in the admin) and
   the deprecated `BS_BAZIS_PERMIT_RELATIONS_VIEW_CHECK` (`permit.W001`).
 - Field permissions in the API: `field.view.<selector>.<field>.disable` removes the field
@@ -205,11 +205,63 @@ class DocumentRouteSet(PermitRouteBase):
 
   (the queryset of bazis-permit also carries the field groups of its objects).
 
+## Custom actions
+
+A custom action of a `PermitRouteBase` (a route of kind `other`: the `http_*` decorators
+without `kind=`; the CRUD, relationships and schema routes check themselves) is secure by
+default (bazis-permit 2.11 with bazis 2.16):
+
+```python
+from bazis.core.routes_abstract.initial import http_get, http_post
+from bazis.core.schemas.enums import CrudAccessAction
+from bazis.core.throttle import throttle
+
+class CertificateRouteSet(PermitRouteBase):
+    model = apps.get_model('training.Certificate')
+
+    @http_get('/export/', access_action=CrudAccessAction.VIEW)     # the collection
+    def action_export(self, **kwargs):
+        qs = self.restrict_queryset(self.model.objects.all(), CrudAccessAction.VIEW)
+        ...
+
+    @http_post('/{item_id}/revoke/', access_action=CrudAccessAction.CHANGE)  # an item
+    def action_revoke(self, item_id: str, **kwargs):
+        item = self.set_item(item_id, with_lock=True)   # 404 / 403 here
+        ...
+
+    @http_get('/verify/', public=True, dependencies=[throttle('10/minute', key='ip')])
+    def action_verify(self, code: str, **kwargs):        # anonymous users too
+        ...
+```
+
+- An anonymous user gets 403 `ERR_FORBIDDEN` on every action not declared `public=True`
+  (as on a create or an update), whatever the roles for anonymous users; the core
+  `/_id/` route declares `access_action=view` and is closed to them as well.
+- `access_action=` on an action of the collection (no `{item_id}` in the path): the
+  permission on the model is checked before the action runs (403). On an action of an
+  item: it is checked on the item when the action takes it with `self.set_item(item_id)`
+  (404 for an item the user cannot view, 403 without the permission); an action of an item
+  must take its item with `set_item` (or `get_item`, which checks only the view).
+- Without `access_action` an action of an item still takes only the items the user views
+  (`set_item`); an action of the collection without it is open to every authenticated user
+  (`permit.W007`): declare `access_action`, or `public=False` if that is intended. Check
+  any other operation explicitly: `self.check_access(CrudAccessAction.CHANGE, item)` (403).
+- `public=True`: anonymous users may call it; it is limited by `BAZIS_THROTTLE_PUBLIC`
+  (`'30/minute'` per IP address, dynamic; empty: unlimited) unless it declares its own
+  `throttle` (core guide). Restrict what it returns yourself: nothing checks permissions
+  for it. A public action of an item still looks the item up among the objects the
+  (anonymous) user views.
+- An override that does not repeat `public`/`access_action` keeps those of the route it
+  overrides (as `kind`); `x-bazis` in OpenAPI shows them (`public`, `access_action`).
+
 ## Rules
 
 - Every route of a protected model inherits `PermitRouteBase` or restricts its objects
   with its own `restrict_queryset` (`permit.W002` lists the JSON:API routes that do
   neither). Only a route of public data declares `permit_public = True`.
+- Every custom action of the collection declares `access_action` or `public`
+  (`permit.W007`); an action open to anonymous users is `public=True`, never a check of
+  `is_anonymous` in its code.
 - The model of a `PermitRouteBase` route is a `PermitModelMixin` (a `PermitStructMixin`):
   with another model the route and the relations into it fail with `AttributeError` as
   soon as the user has a permission on the model (`permit.W003`, a warning).

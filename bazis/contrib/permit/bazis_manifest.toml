@@ -20,6 +20,11 @@ import = "bazis.contrib.permit.routes_abstract.PermitRouteBase"
 use_when = "every route of a model protected by permissions"
 
 [[extension_points]]
+name = "PermitRouteBase.route_run"
+import = "bazis.contrib.permit.routes_abstract.PermitRouteBase"
+use_when = "a custom action of a protected model: http_*(..., access_action=CrudAccessAction.<X>) for the permission it requires, public=True for anonymous users; closed to anonymous users otherwise"
+
+[[extension_points]]
 name = "PermitModelMixin"
 import = "bazis.contrib.permit.models_abstract.PermitModelMixin"
 use_when = "a model protected by permissions (selectors)"
@@ -68,6 +73,13 @@ text = "the filter, sort and search of a request reach the fields the field perm
 text = "the routes of an item answer 404 for an item the user cannot view (as for a missing one) and 403 for one he views but cannot change or delete; the lookup of the item (get_queryset_for_item: set_item, get_item) is restricted by restrict_queryset for view in the same query, so a custom action that takes its item with them answers the same; the read of the response after a write is not restricted (a create or an update that makes the item invisible is 403 and rolled back; a statusy transit that hides it answers 204)"
 
 [[pitfalls]]
+text = "a custom action (kind other) of a PermitRouteBase is closed to anonymous users (403) unless declared public=True (then limited by BAZIS_THROTTLE_PUBLIC per IP address); access_action= is the permission it requires: on the model for an action of the collection, on the item it takes with set_item for an action of an item"
+
+[[pitfalls]]
+text = "a custom action of the collection of a PermitRouteBase without access_action or public is open to every authenticated user: declare access_action (e.g. CrudAccessAction.VIEW and restrict_queryset in its code), or public=False if that is intended"
+check = "permit.W007"
+
+[[pitfalls]]
 text = "QuerySet.update() and bulk_create() on roles, groups and permissions do not invalidate the permission cache"
 
 [[pitfalls]]
@@ -84,8 +96,7 @@ text = "the routes of bazis-users do not check permissions: to restrict the user
 check = "permit.W002"
 
 [[pitfalls]]
-text = "the names of Role and GroupPermission are the columns name_en and name_ru whatever the languages of the project: declare the roles in roles.py with English gettext_lazy names, migrate writes the translations of the catalogs of the project into both"
-check = "permit.W004"
+text = "the names of Role and GroupPermission are the columns name_en and name_ru whatever the languages of the project: declare the roles in roles.py with English gettext_lazy names, migrate writes the translations of the catalogs of the project into both (`manage.py bazis_messages status` lists the untranslated ones)"
 
 [[pitfalls]]
 text = "a declaration of roles.py with an invalid slug, a duplicate or a group of a role that is not declared stops migrate"

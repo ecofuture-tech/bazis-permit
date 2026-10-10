@@ -114,11 +114,52 @@ def check_routes_permit_model(app_configs, **kwargs):
 
 
 @register()
+def check_actions_access(app_configs, **kwargs):
+    """
+    An action of the collection of a permission route (a custom route of kind `other`
+    without `{item_id}`) that declares neither `access_action` nor `public` (True or False)
+    is open to every authenticated user whatever his permissions: nothing ties it to the
+    model (an action of an item takes the item with `set_item`, among those the user
+    views). Runs
+    when the application is loaded (`manage.py bazis_doctor`).
+    """
+    from bazis.core.introspect import loaded_app, route_sets
+
+    if (app := loaded_app()) is None:
+        return []
+
+    from .routes_abstract import PermitRouteBase, route_is_action, route_is_item
+
+    return [
+        Warning(
+            f'The action {route_ctx.name} of the permission route '
+            f'{route_cls.__module__}.{route_cls.__qualname__} declares neither the permission '
+            'it requires nor that it is public: every authenticated user can call it.',
+            hint=(
+                'Declare access_action= of its http_* decorator (the permission it requires on '
+                'the model, e.g. CrudAccessAction.VIEW), public=True if anonymous users may '
+                'call it (limited by BAZIS_THROTTLE_PUBLIC), or public=False if every '
+                'authenticated user may.'
+            ),
+            obj=route_cls,
+            id='permit.W007',
+        )
+        for route_cls, routes in route_sets(app).items()
+        if issubclass(route_cls, PermitRouteBase)
+        for action in dict.fromkeys(it['action'] for it in routes)
+        if route_is_action(route_ctx := route_cls.routes_ctx[action])
+        and not route_is_item(route_ctx)
+        and route_ctx.public is None
+        and route_ctx.access_action is None
+    ]
+
+
+@register()
 def check_declarations(app_configs, **kwargs):
     """
     The roles and permission groups declared in the `roles.py` modules: their slugs, the
     groups of the roles, the models, selectors and fields of the permissions
-    (permit.E004, permit.E005) and the translations of their names (permit.W004).
+    (permit.E004, permit.E005). The translations of their names: `bazis_messages status`.
     """
     from .declare import declaration_messages, declarations
 

@@ -373,12 +373,6 @@ def test_invalid_groups_and_roles():
     assert 'The role decl_role has the group missing, which is not declared.' in texts
 
 
-def test_untranslated_names_are_reported():
-    messages = declaration_messages([('a.roles', Group('decl', _('Not translated anywhere')))], [])
-    assert codes(messages) == ['permit.W004']
-    assert 'into ru: Not translated anywhere' in messages[0].msg
-
-
 @pytest.mark.django_db
 def test_the_database_checks():
     assert check_declarations_applied(None) == []
