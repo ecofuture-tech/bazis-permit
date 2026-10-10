@@ -37,6 +37,7 @@ from bazis.contrib.permit.declare import Group, Role, apply_declarations, declar
 from bazis.contrib.permit.models import GroupPermission, Permission
 from bazis.contrib.permit.models import Role as RoleModel
 from bazis.contrib.users import get_user_model
+from bazis.core.declare import migrations_complete
 
 from tests import factories
 
@@ -212,11 +213,11 @@ def test_post_migrate_skips_an_incomplete_migration_plan(monkeypatch):
     applied = []
     monkeypatch.setattr(declare, 'apply_declarations', lambda using: applied.append(using) or [])
 
-    assert declare.migrations_complete()
+    assert migrations_complete()
     monkeypatch.setattr(
         'django.db.migrations.executor.MigrationExecutor.migration_plan', lambda self, targets: [object()]
     )
-    assert not declare.migrations_complete()
+    assert not migrations_complete()
     declare.post_migrate_apply(sender=None, using='default')
     assert applied == []
 

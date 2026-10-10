@@ -55,7 +55,8 @@ from django.utils.functional import Promise
 
 from translated_fields import to_attribute
 
-# discover, lock and migrations_complete stay importable from here for bazis-statusy < 2.12
+# migrations_complete (with discover and lock) stays importable from here only for
+# bazis-statusy < 2.12
 from bazis.core.declare import (  # noqa: F401
     ManagedSync,
     apply_after_migrate,

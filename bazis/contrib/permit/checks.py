@@ -173,13 +173,9 @@ def check_declarations_applied(app_configs, databases=None, **kwargs):
     is no longer declared (permit.W006). Warnings: `migrate` runs the database checks before
     it applies the declarations. Skipped while migrations are not applied.
     """
-    from .declare import (
-        apply_declarations,
-        declaration_messages,
-        declarations,
-        migrations_complete,
-        orphans,
-    )
+    from bazis.core.declare import migrations_complete
+
+    from .declare import apply_declarations, declaration_messages, declarations, orphans
 
     messages = []
     groups, roles = declarations()
