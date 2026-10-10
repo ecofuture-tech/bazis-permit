@@ -228,7 +228,7 @@ class CertificateRouteSet(PermitRouteBase):
 
     @http_post('/{item_id}/revoke/', access_action=CrudAccessAction.CHANGE)  # an item
     def action_revoke(self, item_id: str, **kwargs):
-        item = self.set_item(item_id, with_lock=True)   # checked already; taken locked
+        item = self.set_item(item_id, with_lock=True)   # checked and locked already
         ...
 
     @http_get('/{item_id}/card/', public=False)          # any authenticated user
@@ -249,9 +249,13 @@ class CertificateRouteSet(PermitRouteBase):
   decide, also the roles for anonymous users (`Role(for_anonymous=True)`). An action of the
   collection (no `{item_id}` in the path) needs the permission on the model (403). An action
   of an item: bazis-permit takes the item of `item_id` into `self.item` before the action
-  runs (404 for an item the user cannot view) and checks the permission on it (403); the
-  action reads `self.item`, or calls `self.set_item(item_id, with_lock=True)` to have it
-  locked. The core `/_id/` route declares `access_action=view`: open as `GET /`.
+  runs (404 for an item the user cannot view) and checks the permission on it (403). For a
+  method that writes (POST, PUT, PATCH, DELETE) it takes it locked (`FOR NO KEY UPDATE`,
+  until the end of the request), so the permission checked (by a selector or a status of
+  the item) holds while the action runs; `self.set_item(item_id, with_lock=True)` then
+  returns it without another query. A GET action that needs the lock calls
+  `set_item(item_id, with_lock=True)` (the item is read again, locked; the view only is
+  checked again). The core `/_id/` route declares `access_action=view`: open as `GET /`.
 - Neither (or `public=False`): authenticated users only, anonymous ones get 403
   `ERR_FORBIDDEN` (as on a create or an update), whatever their roles. Without a
   declaration `permit.W007` warns, for an action of the collection and of an item: declare

@@ -63,6 +63,10 @@ AnonymousUser = get_anonymous_user_model()
 logger = logging.getLogger(__name__)
 
 
+#: the HTTP methods of the actions that write: their item is checked locked
+WRITE_METHODS = frozenset({HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH, HttpMethod.DELETE})
+
+
 def route_is_action(route_ctx: RouteContext) -> bool:
     """
     A custom action: a route of kind `other` (the CRUD, relationships and schema routes
@@ -509,8 +513,9 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         action anyone; with `access_action` the roles decide (also those for anonymous
         users), on the model for an action of the collection, on the item for an action of
         an item, taken here into `self.item` (404 for an item the user cannot view, 403
-        without the permission); with neither only an authenticated user (403, as a create
-        or an update).
+        without the permission), locked until the end of the request for a method that
+        writes (POST, PUT, PATCH, DELETE: the permission checked holds while the action
+        runs); with neither only an authenticated user (403, as a create or an update).
         """
         super().route_check(*args, **kwargs)
         route_ctx = self.route_ctx
@@ -520,7 +525,10 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
             if self.inject.user.is_anonymous:
                 raise JsonApi403Exception
         elif route_is_item(route_ctx):
-            self.check_access(route_ctx.access_action, self.set_item(kwargs['item_id']))
+            item = self.set_item(
+                kwargs['item_id'], with_lock=route_ctx.http_method in WRITE_METHODS
+            )
+            self.check_access(route_ctx.access_action, item)
         else:
             self.check_access(route_ctx.access_action, self.model)
 

@@ -106,7 +106,7 @@ class TeamRouteSet(PermitRouteBase):
 
     @http_post('/{item_id}/rename/', access_action=CrudAccessAction.CHANGE)
     def action_rename(self, item_id: str, name: str, **kwargs) -> str:
-        # the item is checked already; taken again, locked
+        # checked and locked already (a POST action): no other query
         item = self.set_item(item_id, with_lock=True)
         item.name = name
         item.save()

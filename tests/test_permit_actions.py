@@ -279,3 +279,36 @@ def test_inherited_and_declared_public(sample_app, team):
     response = client.get(f'{URL_TEAM_GUEST}count/')
     assert (response.status_code, response.json()) == (200, 0)
     assert client.get(f'{URL_TEAM}count/').status_code == 403
+
+
+@pytest.mark.django_db(transaction=True)
+def test_item_of_a_writing_action_is_checked_locked(sample_app, team, monkeypatch):
+    """
+    The item of an action of an item that writes (POST `rename`, access_action=change) is
+    taken locked before the action runs, so the permission checked holds while it runs;
+    its `set_item(item_id, with_lock=True)` gets it without another query. A GET action
+    takes no lock.
+    """
+    from bazis.core.routes_abstract.jsonapi import JsonapiRouteBase
+
+    lookups = []
+    lookup = JsonapiRouteBase.get_queryset_for_item
+
+    def recorded(self, item_id, with_lock=False):
+        lookups.append((type(self).__name__, with_lock))
+        return lookup(self, item_id, with_lock)
+
+    monkeypatch.setattr(JsonapiRouteBase, 'get_queryset_for_item', recorded)
+    editor = user_with(
+        'editor',
+        role_with('team_edit', 'entity.team.item.view.all', 'entity.team.item.change.all'),
+    )
+    client = get_api_client(sample_app, editor.jwt_build())
+    assert rename(client, team).status_code == 200
+    # one lookup, locked, in route_check; the set_item of the action returns that item
+    assert lookups == [('TeamRouteSet', True)]
+    assert Team.objects.get(pk=team.pk).name == 'Platform'
+
+    lookups.clear()
+    assert client.get(f'{URL_TEAM}{team.id}/card/').status_code == 200
+    assert lookups == [('TeamRouteSet', False)]
