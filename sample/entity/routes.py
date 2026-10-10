@@ -16,7 +16,7 @@ from django.apps import apps
 
 from bazis.contrib.author.routes_abstract import AuthorRouteBase
 from bazis.contrib.permit.routes_abstract import PermitRouteBase
-from bazis.core.routes_abstract.initial import http_get, http_post
+from bazis.core.routes_abstract.initial import http_get, http_post, route_declare
 from bazis.core.routes_abstract.jsonapi import JsonapiRouteBase
 from bazis.core.schemas import CrudAccessAction, SchemaField, SchemaFields
 from bazis.core.throttle import throttle
@@ -80,13 +80,15 @@ class TeamRouteSet(PermitRouteBase):
     """
 
     model = apps.get_model('entity.Team')
+    # the restrictions of the teams for the other routes (TeamGuestRouteSet below)
+    default_route = True
 
     fields = {
         None: SchemaFields(include={'meetings': None}),
     }
 
-    # custom actions: closed to anonymous users unless public, with the permission they
-    # declare (access_action) on the model or on the item
+    # custom actions: public=True for anyone; access_action: the roles decide, on the model
+    # or on the item (taken before the action runs); public=False: authenticated users
 
     @http_get('/count/', access_action=CrudAccessAction.VIEW)
     def action_count(self, **kwargs) -> int:
@@ -104,12 +106,13 @@ class TeamRouteSet(PermitRouteBase):
 
     @http_post('/{item_id}/rename/', access_action=CrudAccessAction.CHANGE)
     def action_rename(self, item_id: str, name: str, **kwargs) -> str:
-        item = self.set_item(item_id)
+        # the item is checked already; taken again, locked
+        item = self.set_item(item_id, with_lock=True)
         item.name = name
         item.save()
         return item.name
 
-    @http_get('/{item_id}/card/')
+    @http_get('/{item_id}/card/', public=False)
     def action_card(self, item_id: str, **kwargs) -> str:
         return self.set_item(item_id).name
 
@@ -132,3 +135,22 @@ class BookmarkRouteSet(JsonapiRouteBase):
 
     model = apps.get_model('entity.Bookmark')
     permit_public = True
+
+
+class TeamGuestRouteSet(TeamRouteSet):
+    """
+    The actions of the teams declared again for guests: an override keeps `public` unless it
+    declares it, `route_declare` changes it without repeating the decorator.
+    """
+
+    actions = ['action_motto', 'action_count']
+
+    @classmethod
+    def get_url_prefix(cls) -> str:
+        return '/entity/team_guest'
+
+    @http_get('/motto/')
+    def action_motto(self, **kwargs) -> str:
+        return 'Together, as a guest'
+
+    action_count = route_declare(TeamRouteSet.action_count, public=True)

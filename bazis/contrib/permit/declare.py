@@ -42,10 +42,12 @@ declarations of bazis-statusy (`workflow.py`).
 import logging
 import re
 import sys
+import warnings
 from dataclasses import dataclass
 from importlib import import_module
 
 from django.apps import apps
+from django.conf import settings
 from django.core.checks import CheckMessage, Error
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DEFAULT_DB_ALIAS, connections, router, transaction
@@ -132,6 +134,31 @@ def translations(text: str | Promise, field: str = 'name') -> dict[str, str]:
         with translation.override(language):
             values[to_attribute(field, language)] = str(text)
     return values
+
+
+def untranslated(texts: list[str | Promise]) -> dict[str, list[str]]:
+    """
+    Deprecated, removed in bazis-permit 2.12: kept for bazis-statusy < 2.12, which imports
+    it. The untranslated texts of a project are listed by `manage.py bazis_messages status`
+    of the core. The texts that have no translation in a language of LANGUAGES other than
+    English (the language of the msgids), by language.
+    """
+    warnings.warn(
+        'bazis.contrib.permit.declare.untranslated is deprecated and will be removed in '
+        'bazis-permit 2.12: use manage.py bazis_messages status.',
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    with translation.override(None):
+        sources = [str(it) for it in texts]
+    missing = {}
+    for language, _name in settings.LANGUAGES:
+        if language.lower().split('-')[0] == 'en':
+            continue
+        with translation.override(language):
+            if names := [src for src, text in zip(sources, texts, strict=True) if str(text) == src]:
+                missing[language] = names
+    return missing
 
 
 def lock(using: str = DEFAULT_DB_ALIAS) -> None:

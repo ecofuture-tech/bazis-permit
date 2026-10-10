@@ -116,10 +116,9 @@ def check_routes_permit_model(app_configs, **kwargs):
 @register()
 def check_actions_access(app_configs, **kwargs):
     """
-    An action of the collection of a permission route (a custom route of kind `other`
-    without `{item_id}`) that declares neither `access_action` nor `public` (True or False)
-    is open to every authenticated user whatever his permissions: nothing ties it to the
-    model (an action of an item takes the item with `set_item`, among those the user
+    A custom action of a permission route that declares neither `access_action` nor
+    `public` (True or False) is open to every authenticated user whatever his permissions
+    (an action of an item that takes its item with `set_item` only among those the user
     views). Runs
     when the application is loaded (`manage.py bazis_doctor`).
     """
@@ -128,7 +127,7 @@ def check_actions_access(app_configs, **kwargs):
     if (app := loaded_app()) is None:
         return []
 
-    from .routes_abstract import PermitRouteBase, route_is_action, route_is_item
+    from .routes_abstract import PermitRouteBase, route_is_action
 
     return [
         Warning(
@@ -137,9 +136,11 @@ def check_actions_access(app_configs, **kwargs):
             'it requires nor that it is public: every authenticated user can call it.',
             hint=(
                 'Declare access_action= of its http_* decorator (the permission it requires on '
-                'the model, e.g. CrudAccessAction.VIEW), public=True if anonymous users may '
-                'call it (limited by BAZIS_THROTTLE_PUBLIC), or public=False if every '
-                'authenticated user may.'
+                'the model, or on the item for an action of an item, e.g. '
+                'CrudAccessAction.CHANGE), public=True if anonymous users may call it (limited '
+                'by BAZIS_THROTTLE_PUBLIC per user or IP address), or public=False if every '
+                'authenticated user may (an action of an item that takes its item with '
+                'set_item: among the items he views).'
             ),
             obj=route_cls,
             id='permit.W007',
@@ -148,7 +149,6 @@ def check_actions_access(app_configs, **kwargs):
         if issubclass(route_cls, PermitRouteBase)
         for action in dict.fromkeys(it['action'] for it in routes)
         if route_is_action(route_ctx := route_cls.routes_ctx[action])
-        and not route_is_item(route_ctx)
         and route_ctx.public is None
         and route_ctx.access_action is None
     ]

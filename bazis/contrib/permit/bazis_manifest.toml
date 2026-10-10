@@ -22,7 +22,7 @@ use_when = "every route of a model protected by permissions"
 [[extension_points]]
 name = "PermitRouteBase.route_run"
 import = "bazis.contrib.permit.routes_abstract.PermitRouteBase"
-use_when = "a custom action of a protected model: http_*(..., access_action=CrudAccessAction.<X>) for the permission it requires, public=True for anonymous users; closed to anonymous users otherwise"
+use_when = "a custom action of a protected model (checked in route_check before it runs): access_action=CrudAccessAction.<X> for the permission the roles must give (on the model, or on the item of item_id taken into self.item), public=True for anyone, public=False for any authenticated user"
 
 [[extension_points]]
 name = "PermitModelMixin"
@@ -73,10 +73,10 @@ text = "the filter, sort and search of a request reach the fields the field perm
 text = "the routes of an item answer 404 for an item the user cannot view (as for a missing one) and 403 for one he views but cannot change or delete; the lookup of the item (get_queryset_for_item: set_item, get_item) is restricted by restrict_queryset for view in the same query, so a custom action that takes its item with them answers the same; the read of the response after a write is not restricted (a create or an update that makes the item invisible is 403 and rolled back; a statusy transit that hides it answers 204)"
 
 [[pitfalls]]
-text = "a custom action (kind other) of a PermitRouteBase is closed to anonymous users (403) unless declared public=True (then limited by BAZIS_THROTTLE_PUBLIC per IP address); access_action= is the permission it requires: on the model for an action of the collection, on the item it takes with set_item for an action of an item"
+text = "a custom action (kind other) of a PermitRouteBase: public=True is open to anyone (limited by BAZIS_THROTTLE_PUBLIC per user or IP address); with access_action= the roles decide, also those for anonymous users (on the model for an action of the collection, on the item of item_id, taken before the action runs, for an action of an item: self.item, set_item(item_id, with_lock=True) to lock it); with neither only authenticated users (403 for anonymous ones)"
 
 [[pitfalls]]
-text = "a custom action of the collection of a PermitRouteBase without access_action or public is open to every authenticated user: declare access_action (e.g. CrudAccessAction.VIEW and restrict_queryset in its code), or public=False if that is intended"
+text = "a custom action of a PermitRouteBase (of the collection or of an item) without access_action or public is open to every authenticated user: declare access_action (e.g. CrudAccessAction.VIEW, restrict_queryset in its code), or public=False if that is intended"
 check = "permit.W007"
 
 [[pitfalls]]

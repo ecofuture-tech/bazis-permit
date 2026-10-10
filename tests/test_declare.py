@@ -373,6 +373,14 @@ def test_invalid_groups_and_roles():
     assert 'The role decl_role has the group missing, which is not declared.' in texts
 
 
+def test_untranslated_is_deprecated():
+    """Kept for bazis-statusy < 2.12, which imports it; removed in bazis-permit 2.12."""
+    from bazis.contrib.permit.declare import untranslated
+
+    with pytest.warns(DeprecationWarning, match='bazis_messages status'):
+        assert untranslated([_('Not translated anywhere')]) == {'ru': ['Not translated anywhere']}
+
+
 @pytest.mark.django_db
 def test_the_database_checks():
     assert check_declarations_applied(None) == []

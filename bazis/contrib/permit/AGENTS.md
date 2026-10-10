@@ -146,8 +146,9 @@ class DocumentRouteSet(PermitRouteBase):
 - Selector array fields (`autogen_<field>_selectors`, GIN) are generated only for the
   forward relations to `PermitSelectorMixin` models listed in `autogen_selectors_fields`;
   many-to-many and reverse selectors do not need them.
-- Custom actions (routes of kind `other` of the `http_*` decorators, see below) are
-  closed to anonymous users and check the permission they declare.
+- Custom actions (routes of kind `other` of the `http_*` decorators, see below) check the
+  permission they declare (`access_action`), else are closed to anonymous users unless
+  `public=True`.
 - Settings: `BS_BAZIS_PERMISSION_CACHE_EXPIRE` (seconds, 7; dynamic, in the admin) and
   the deprecated `BS_BAZIS_PERMIT_RELATIONS_VIEW_CHECK` (`permit.W001`).
 - Field permissions in the API: `field.view.<selector>.<field>.disable` removes the field
@@ -208,8 +209,9 @@ class DocumentRouteSet(PermitRouteBase):
 ## Custom actions
 
 A custom action of a `PermitRouteBase` (a route of kind `other`: the `http_*` decorators
-without `kind=`; the CRUD, relationships and schema routes check themselves) is secure by
-default (bazis-permit 2.11 with bazis 2.16):
+without `kind=`, not `http_internal`; the CRUD, relationships and schema routes check
+themselves) declares who may call it (bazis-permit 2.11 with bazis 2.16). bazis-permit
+checks it in `route_check`, before the action runs, in its transaction:
 
 ```python
 from bazis.core.routes_abstract.initial import http_get, http_post
@@ -226,41 +228,48 @@ class CertificateRouteSet(PermitRouteBase):
 
     @http_post('/{item_id}/revoke/', access_action=CrudAccessAction.CHANGE)  # an item
     def action_revoke(self, item_id: str, **kwargs):
-        item = self.set_item(item_id, with_lock=True)   # 404 / 403 here
+        item = self.set_item(item_id, with_lock=True)   # checked already; taken locked
         ...
 
+    @http_get('/{item_id}/card/', public=False)          # any authenticated user
+    def action_card(self, item_id: str, **kwargs):
+        return self.set_item(item_id).title              # among the items he views
+
     @http_get('/verify/', public=True, dependencies=[throttle('10/minute', key='ip')])
-    def action_verify(self, code: str, **kwargs):        # anonymous users too
+    def action_verify(self, code: str, **kwargs):        # anyone
         ...
 ```
 
-- An anonymous user gets 403 `ERR_FORBIDDEN` on every action not declared `public=True`
-  (as on a create or an update), whatever the roles for anonymous users; the core
-  `/_id/` route declares `access_action=view` and is closed to them as well.
-- `access_action=` on an action of the collection (no `{item_id}` in the path): the
-  permission on the model is checked before the action runs (403). On an action of an
-  item: it is checked on the item when the action takes it with `self.set_item(item_id)`
-  (404 for an item the user cannot view, 403 without the permission); an action of an item
-  must take its item with `set_item` (or `get_item`, which checks only the view).
-- Without `access_action` an action of an item still takes only the items the user views
-  (`set_item`); an action of the collection without it is open to every authenticated user
-  (`permit.W007`): declare `access_action`, or `public=False` if that is intended. Check
-  any other operation explicitly: `self.check_access(CrudAccessAction.CHANGE, item)` (403).
-- `public=True`: anonymous users may call it; it is limited by `BAZIS_THROTTLE_PUBLIC`
-  (`'30/minute'` per IP address, dynamic; empty: unlimited) unless it declares its own
-  `throttle` (core guide). Restrict what it returns yourself: nothing checks permissions
-  for it. A public action of an item still looks the item up among the objects the
-  (anonymous) user views.
+- `public=True`: anyone, also anonymous users, without a check; limited by
+  `BAZIS_THROTTLE_PUBLIC` (`'30/minute'` per user or IP address, dynamic; empty:
+  unlimited) unless it declares its own `throttle` (core guide). Restrict what it returns
+  yourself. A public action of an item that takes its item with `set_item` still looks it
+  up among the objects the (anonymous) user views.
+- `access_action=CrudAccessAction.<X>` (or `StatusyAccessAction.TRANSIT`, ...): the roles
+  decide, also the roles for anonymous users (`Role(for_anonymous=True)`). An action of the
+  collection (no `{item_id}` in the path) needs the permission on the model (403). An action
+  of an item: bazis-permit takes the item of `item_id` into `self.item` before the action
+  runs (404 for an item the user cannot view) and checks the permission on it (403); the
+  action reads `self.item`, or calls `self.set_item(item_id, with_lock=True)` to have it
+  locked. The core `/_id/` route declares `access_action=view`: open as `GET /`.
+- Neither (or `public=False`): authenticated users only, anonymous ones get 403
+  `ERR_FORBIDDEN` (as on a create or an update), whatever their roles. Without a
+  declaration `permit.W007` warns, for an action of the collection and of an item: declare
+  `access_action`, or `public=False` when any authenticated user may call it (an action of
+  an item that takes its item with `set_item` only among the items he views). Check any
+  other operation explicitly: `self.check_access(CrudAccessAction.CHANGE, item)` (403).
 - An override that does not repeat `public`/`access_action` keeps those of the route it
-  overrides (as `kind`); `x-bazis` in OpenAPI shows them (`public`, `access_action`).
+  overrides (as `kind`); `route_declare(route, public=True)` (core) changes them on an
+  inherited route without repeating its decorator. `x-bazis` in OpenAPI shows `public`
+  (always) and `access_action` (when declared).
 
 ## Rules
 
 - Every route of a protected model inherits `PermitRouteBase` or restricts its objects
   with its own `restrict_queryset` (`permit.W002` lists the JSON:API routes that do
   neither). Only a route of public data declares `permit_public = True`.
-- Every custom action of the collection declares `access_action` or `public`
-  (`permit.W007`); an action open to anonymous users is `public=True`, never a check of
+- Every custom action declares `access_action` or `public` (`permit.W007`); an action open
+  to anonymous users is `public=True`, and an action closed to them needs no check of
   `is_anonymous` in its code.
 - The model of a `PermitRouteBase` route is a `PermitModelMixin` (a `PermitStructMixin`):
   with another model the route and the relations into it fail with `AttributeError` as

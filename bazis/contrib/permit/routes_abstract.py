@@ -47,7 +47,7 @@ from bazis.core.schemas import (
     SchemaResourceBuilder,
     meta_field,
 )
-from bazis.core.schemas.enums import RouteKind
+from bazis.core.schemas.enums import HttpMethod, RouteKind
 from bazis.core.services.includes import include_to_list
 from bazis.core.utils.functools import class_or_instance_method
 from bazis.core.utils.orm import apply_calc_queryset
@@ -66,9 +66,12 @@ logger = logging.getLogger(__name__)
 def route_is_action(route_ctx: RouteContext) -> bool:
     """
     A custom action: a route of kind `other` (the CRUD, relationships and schema routes
-    check the permissions themselves).
+    check the permissions themselves), not the internal route (`http_internal`).
     """
-    return (route_ctx.kind or RouteKind.OTHER) is RouteKind.OTHER
+    return (
+        (route_ctx.kind or RouteKind.OTHER) is RouteKind.OTHER
+        and route_ctx.http_method != HttpMethod.INTERNAL
+    )
 
 
 def route_is_item(route_ctx: RouteContext) -> bool:
@@ -500,35 +503,26 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         ):
             raise JsonApi403Exception()
 
-    def route_run(self, *args, **kwargs):
+    def route_check(self, *args, **kwargs):
         """
-        The custom actions (`route_is_action`) are closed to anonymous users unless
-        declared `public=True` (403, as a create or an update); an action of the collection
-        that declares `access_action` requires that permission on the model (403), an action
-        of an item requires it on the item it takes with `set_item`.
+        Who may call a custom action (`route_is_action`), before it runs: a `public=True`
+        action anyone; with `access_action` the roles decide (also those for anonymous
+        users), on the model for an action of the collection, on the item for an action of
+        an item, taken here into `self.item` (404 for an item the user cannot view, 403
+        without the permission); with neither only an authenticated user (403, as a create
+        or an update).
         """
+        super().route_check(*args, **kwargs)
         route_ctx = self.route_ctx
-        if route_is_action(route_ctx):
-            if not route_ctx.public and self.inject.user.is_anonymous:
+        if not route_is_action(route_ctx) or route_ctx.public:
+            return
+        if route_ctx.access_action is None:
+            if self.inject.user.is_anonymous:
                 raise JsonApi403Exception
-            if route_ctx.access_action is not None and not route_is_item(route_ctx):
-                self.check_access(route_ctx.access_action, self.model)
-        return super().route_run(*args, **kwargs)
-
-    def set_item(self, item_id: str, with_lock: bool = False, is_force: bool = False):
-        """
-        The item of the route; an action of an item that declares `access_action` requires
-        that permission on it (403; 404 for an item the user cannot view).
-        """
-        item = super().set_item(item_id, with_lock=with_lock, is_force=is_force)
-        route_ctx = self.route_ctx
-        if (
-            route_ctx.access_action is not None
-            and route_is_action(route_ctx)
-            and route_is_item(route_ctx)
-        ):
-            self.check_access(route_ctx.access_action, item)
-        return item
+        elif route_is_item(route_ctx):
+            self.check_access(route_ctx.access_action, self.set_item(kwargs['item_id']))
+        else:
+            self.check_access(route_ctx.access_action, self.model)
 
     def get_queryset_for_item(self, item_id: str, with_lock: bool = False):
         """

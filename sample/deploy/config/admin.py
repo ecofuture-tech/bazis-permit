@@ -23,7 +23,11 @@ threads = 2
 error_logfile = '-'
 capture_output = True
 worker_tmp_dir = '/dev/shm'
-forwarded_allow_ips = '*'
+# the proxies whose X-Forwarded-For gives the client address (the throttle counts it);
+# never '*' on a server the clients reach directly
+forwarded_allow_ips = os.getenv(
+    'BS_FORWARDED_ALLOW_IPS', '127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16'
+)
 max_requests = 10000
 max_requests_jitter = int(max_requests / 10) + 1
 workers = int(os.getenv('_BS_APP_GUNICORN_WORKERS', psutil.cpu_count()))
