@@ -33,7 +33,7 @@ classifiers = [
     "Framework :: FastAPI",
 ]
 dependencies = [
-    "bazis>=2.7.0",  # raise to >=2.16.0 at the release: public/access_action of the actions, throttle
+    "bazis>=2.7.0",  # raise to >=2.16.0 at the release: public/access_action of the actions, throttle, bazis.core.declare
     "bazis-users>=2.3.0",
 ]
 

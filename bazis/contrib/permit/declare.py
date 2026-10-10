@@ -35,36 +35,39 @@ exists unmarked is taken over with a warning. A managed object no longer declare
 (the database check warns). The names are English msgids: each `name_<language>` column
 gets their translation in the catalogs of the project.
 
-The helpers `discover`, `translations` and `migrations_complete` are shared with the
+The helpers of the declarations (`discover`, `lock`, `migrations_complete`, the managed
+objects) are those of the core, `bazis.core.declare`; `translations` is shared with the
 declarations of bazis-statusy (`workflow.py`).
 """
 
-import logging
 import re
-import sys
 import warnings
 from dataclasses import dataclass
-from importlib import import_module
 
 from django.apps import apps
 from django.conf import settings
 from django.core.checks import CheckMessage, Error
 from django.core.exceptions import ImproperlyConfigured
-from django.db import DEFAULT_DB_ALIAS, connections, router, transaction
-from django.db.migrations.executor import MigrationExecutor
+from django.db import DEFAULT_DB_ALIAS, transaction
 from django.db.models import Q
 from django.utils import translation
 from django.utils.functional import Promise
-from django.utils.module_loading import module_has_submodule
 
 from translated_fields import to_attribute
 
+# discover, lock and migrations_complete stay importable from here for bazis-statusy < 2.12
+from bazis.core.declare import (  # noqa: F401
+    ManagedSync,
+    apply_after_migrate,
+    discover,
+    lock,
+    managed_orphans,
+    migrations_complete,
+)
 from bazis.core.utils.functools import camel_2_snake
 
 from .models_abstract import LANGUAGES, PermitModelMixin, PermitSelectorMixin
 
-
-logger = logging.getLogger(__name__)
 
 #: the slug of a declared group or role
 SLUG = re.compile(r'^[a-z0-9_-]+$')
@@ -73,9 +76,6 @@ SLUG = re.compile(r'^[a-z0-9_-]+$')
 SELECTOR_NAME = re.compile(r'^[a-zA-Z_]+$')
 #: the restrictions of a field permission, besides `filter:<condition>`
 FIELD_RESTRICTS = {'enable', 'disable', 'readonly'}
-#: the key of the PostgreSQL advisory lock that serializes the application of the
-#: declarations (bazis-permit and bazis-statusy) by concurrent `migrate` runs
-ADVISORY_LOCK = 0x62617A6973  # 'bazis'
 
 
 @dataclass(frozen=True)
@@ -108,20 +108,6 @@ class Role:
         object.__setattr__(
             self, 'groups', tuple(it.slug if isinstance(it, Group) else it for it in self.groups)
         )
-
-
-def discover(module: str, attribute: str) -> list[tuple[str, object]]:
-    """
-    The items of the list `attribute` of the modules `<app>.<module>` of the installed
-    applications, with the name of their module. A module without the attribute is not a
-    declaration and is skipped.
-    """
-    found = []
-    for app_config in apps.get_app_configs():
-        if module_has_submodule(app_config.module, module):
-            declared = import_module(f'{app_config.name}.{module}')
-            found.extend((declared.__name__, it) for it in getattr(declared, attribute, ()))
-    return found
 
 
 def translations(text: str | Promise, field: str = 'name') -> dict[str, str]:
@@ -159,27 +145,6 @@ def untranslated(texts: list[str | Promise]) -> dict[str, list[str]]:
             if names := [src for src, text in zip(sources, texts, strict=True) if str(text) == src]:
                 missing[language] = names
     return missing
-
-
-def lock(using: str = DEFAULT_DB_ALIAS) -> None:
-    """
-    In a transaction, waits for the other applications of the declarations (another
-    `migrate` of the same database) to end: a PostgreSQL advisory lock released at the end
-    of the transaction. Other databases have none.
-    """
-    connection = connections[using]
-    if connection.vendor == 'postgresql':
-        with connection.cursor() as cursor:
-            cursor.execute('SELECT pg_advisory_xact_lock(%s)', [ADVISORY_LOCK])
-
-
-def migrations_complete(using: str = DEFAULT_DB_ALIAS) -> bool:
-    """
-    Whether the database has all the migrations of the project: the declarations are
-    applied only then (a `migrate` to an earlier migration skips them).
-    """
-    executor = MigrationExecutor(connections[using])
-    return not executor.migration_plan(executor.loader.graph.leaf_nodes())
 
 
 def declarations() -> tuple[list[tuple[str, Group]], list[tuple[str, Role]]]:
@@ -349,44 +314,11 @@ def declaration_messages(groups, roles) -> list[CheckMessage]:  # noqa: C901
     return messages
 
 
-class _Sync:
+class _Sync(ManagedSync):
     """
-    Brings the database to the declarations, or only lists the changes (`dry_run`).
+    Brings the database to the declarations, or only lists the changes (`dry_run`): the
+    objects (`ManagedSync`) and the many-to-many relations of the managed ones.
     """
-
-    def __init__(self, using: str, dry_run: bool):
-        self.using = using
-        self.dry_run = dry_run
-        self.changes: list[str] = []
-
-    def object(self, model, slug: str, values: dict):
-        """
-        The managed object of the slug with these values: created, updated or taken over.
-        """
-        label = f'{model._meta.model_name} {slug}'
-        obj = model.objects.using(self.using).filter(slug=slug).first()
-        if obj is None:
-            self.changes.append(f'{label}: created')
-            obj = model(slug=slug, managed=True, **values)
-            if not self.dry_run:
-                obj.save(using=self.using)
-            return obj
-        changed = [name for name, value in values.items() if getattr(obj, name) != value]
-        if not obj.managed:
-            if not self.dry_run:
-                logger.warning(
-                    'The %s exists and is not managed by the code: the declaration takes it over.', label
-                )
-            changed.append('managed')
-            obj.managed = True
-        if changed:
-            self.changes.append(f'{label}: {", ".join(changed)} changed')
-            for name in changed:
-                if name in values:
-                    setattr(obj, name, values[name])
-            if not self.dry_run:
-                obj.save(using=self.using, update_fields=changed)
-        return obj
 
     def relation(self, obj, field: str, current, declared: set[str], related_model) -> None:
         """
@@ -446,14 +378,14 @@ def apply_declarations(
                 )
 
         for _module, group in groups:
-            obj = sync.object(group_model, group.slug, translations(group.name))
+            obj, _changed = sync.object(group_model, group.slug, translations(group.name))
             sync.relation(
                 obj, 'permissions', lambda it: it.permissions.all(), set(group.permissions), permission_model
             )
 
         declared_groups = {group.slug for _module, group in groups}
         for _module, role in roles:
-            obj = sync.object(
+            obj, _changed = sync.object(
                 role_model, role.slug, {**translations(role.name), 'for_anonymous': role.for_anonymous}
             )
             # the groups the admin attached (not managed) stay
@@ -477,8 +409,7 @@ def orphans(using: str = DEFAULT_DB_ALIAS, groups=None, roles=None) -> list[str]
         model = apps.get_model('permit', model_name)
         found.extend(
             f'{model._meta.model_name} {slug}'
-            for slug in model.objects.using(using).filter(managed=True).exclude(slug__in=slugs)
-            .order_by('slug').values_list('slug', flat=True)
+            for slug in managed_orphans(model, slugs, using).values_list('slug', flat=True)
         )
     return found
 
@@ -488,15 +419,6 @@ def post_migrate_apply(sender, using=DEFAULT_DB_ALIAS, verbosity=1, **kwargs):
     The receiver of `post_migrate` (also sent by `flush`): applies the declarations once
     the migrations of the project are all applied.
     """
-    if not router.allow_migrate_model(using, apps.get_model('permit.Role')):
-        return
-    if not migrations_complete(using):
-        logger.info('Not all the migrations are applied: the declared roles are not applied.')
-        return
-    changes = apply_declarations(using)
-    stdout = kwargs.get('stdout') or sys.stdout
-    if changes and verbosity >= 1:
-        stdout.write(f'  Applied the declared roles: {len(changes)} change(s)\n')
-    if verbosity >= 2:
-        for change in changes:
-            stdout.write(f'    {change}\n')
+    apply_after_migrate(
+        apply_declarations, 'permit.Role', 'roles', using, verbosity, kwargs.get('stdout')
+    )

@@ -157,7 +157,7 @@ def test_an_unmarked_object_of_the_slug_is_taken_over(caplog):
     group = GroupPermission.objects.create(slug='decl_viewers', name_en='Old')
     group.permissions.add(Permission.objects.get_or_create(slug=CHANGE)[0])
 
-    with caplog.at_level(logging.WARNING, logger='bazis.contrib.permit.declare'):
+    with caplog.at_level(logging.WARNING, logger='bazis.core.declare'):
         changes = apply_declarations(groups=[Group('decl_viewers', 'Viewers', [VIEW])], roles=[])
 
     assert 'grouppermission decl_viewers: name_en, name_ru, managed changed' in changes
@@ -224,7 +224,7 @@ def test_post_migrate_skips_an_incomplete_migration_plan(monkeypatch):
 def test_post_migrate_skips_a_database_without_the_roles(monkeypatch):
     applied = []
     monkeypatch.setattr(declare, 'apply_declarations', lambda using: applied.append(using) or [])
-    monkeypatch.setattr(declare.router, 'allow_migrate_model', lambda using, model: False)
+    monkeypatch.setattr('django.db.router.allow_migrate_model', lambda using, model: False)
     declare.post_migrate_apply(sender=None, using='other')
     assert applied == []
 

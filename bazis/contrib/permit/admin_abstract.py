@@ -28,6 +28,7 @@ from translated_fields import TranslatedFieldAdmin
 from bazis.contrib.permit.schemas import PATTERN_SELECTORS
 from bazis.contrib.users import get_user_model
 from bazis.core.admin_abstract import AutocompleteMixin, DtAdminMixin, M2mThroughMixin
+from bazis.core.admin_abstract import ManagedAdminMixin as CoreManagedAdminMixin
 from bazis.core.utils.sets_order import OrderedSet
 
 
@@ -69,63 +70,16 @@ class UserPermitAdminMixin:
         return format_html_join(mark_safe('<br/>'), '{}', ((role.name,) for role in user.roles.all()))
 
 
-class ManagedAdminMixin:
+class ManagedAdminMixin(CoreManagedAdminMixin):
     """
-    The objects declared in the code (`managed` and declared in a roles.py module,
-    bazis.contrib.permit.declare) are read-only in the admin, besides the fields of
-    `managed_editable`, and are not deleted: `migrate` would bring them back. A managed
-    object no longer declared is an ordinary object again.
+    The roles and groups declared in a roles.py module (bazis.contrib.permit.declare) are
+    read-only in the admin (`bazis.core.admin_abstract.ManagedAdminMixin`).
     """
-
-    #: the fields of a declared object the admin still changes
-    managed_editable: tuple[str, ...] = ()
 
     def declared_slugs(self) -> set[str]:
         from .declare import declared_slugs
 
         return declared_slugs(self.model._meta.model_name)
-
-    def is_declared(self, obj) -> bool:
-        return obj.managed and obj.slug in self.declared_slugs()
-
-    def get_readonly_fields(self, request, obj=None):
-        fields = (*super().get_readonly_fields(request, obj), 'managed')
-        if obj is not None and self.is_declared(obj):
-            opts = self.model._meta
-            fields += tuple(
-                f.name for f in (*opts.concrete_fields, *opts.many_to_many)
-                if f.editable and f.name not in self.managed_editable and f.name not in fields
-            )
-        return fields
-
-    def has_change_permission(self, request, obj=None):
-        if obj is not None and not self.managed_editable and self.is_declared(obj):
-            return False
-        return super().has_change_permission(request, obj)
-
-    def has_delete_permission(self, request, obj=None):
-        if obj is not None and self.is_declared(obj):
-            return False
-        return super().has_delete_permission(request, obj)
-
-    def delete_queryset(self, request, queryset):
-        super().delete_queryset(request, queryset.exclude(managed=True, slug__in=self.declared_slugs()))
-
-    def get_changelist_formset(self, request, **kwargs):
-        formset = super().get_changelist_formset(request, **kwargs)
-        editable = self.managed_editable
-        declared = self.declared_slugs()
-
-        class ManagedFormSet(formset):
-            def _construct_form(self, i, **kwargs):
-                form = super()._construct_form(i, **kwargs)
-                if form.instance.managed and form.instance.slug in declared:
-                    for name, field in form.fields.items():
-                        if name not in editable:
-                            field.disabled = True
-                return form
-
-        return ManagedFormSet
 
 
 class RoleAdminBase(
