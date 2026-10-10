@@ -254,8 +254,9 @@ class CertificateRouteSet(PermitRouteBase):
   until the end of the request), so the permission checked (by a selector or a status of
   the item) holds while the action runs; `self.set_item(item_id, with_lock=True)` then
   returns it without another query. A GET action that needs the lock calls
-  `set_item(item_id, with_lock=True)` (the item is read again, locked; the view only is
-  checked again). The core `/_id/` route declares `access_action=view`: open as `GET /`.
+  `set_item(item_id, with_lock=True)` (the item is read again, locked; the permission was
+  checked before the action on the unlocked item, so a GET action must not rely on a
+  permission that depends on fields another request may change meanwhile). The core `/_id/` route declares `access_action=view`: open as `GET /`.
 - Neither (or `public=False`): authenticated users only, anonymous ones get 403
   `ERR_FORBIDDEN` (as on a create or an update), whatever their roles. Without a
   declaration `permit.W007` warns, for an action of the collection and of an item: declare
