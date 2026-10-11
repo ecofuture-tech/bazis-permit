@@ -31,7 +31,7 @@ entity.parent.field.change.all.children.filter:is_active=true  # relation may re
   matches each of them), `author`
   (bazis-author) or a relation linking the object to the user or his selector source
   (`org_owner`: a model that inherits `PermitSelectorMixin` and implements the classmethod
-  `get_selector_for_user(user)`, returning an object or a list): a foreign key,
+  `get_selector_for_user(user)`, returning an object, a list or a queryset): a foreign key,
   a many-to-many field (`participants`) or a reverse relation by its `related_name`
   (`members` for `User.team = ForeignKey(Team, related_name='members')`, `watchers` for
   `User.teams_watched = ManyToManyField(Team, related_name='watchers')`), or a path of

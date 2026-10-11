@@ -84,12 +84,16 @@ def _selectors_perform(query: QueryComplex, user: 'User', struct: 'PermitStructM
 
                     if selector_model and issubclass(selector_model, PermitSelectorMixin):
                         selector_value = selector_model.get_selector_for_user(user)
+                        if isinstance(selector_value, QuerySet):
+                            # the source of several objects as a queryset: its objects, as
+                            # a list (the conditions take the values, not a subquery)
+                            selector_value = list(selector_value)
 
                         if selector_value:
                             # extract according to model rules
                             if node.key == PERM_SELF:
                                 # the source of the selector is one object or several
-                                if isinstance(selector_value, list | set | tuple | QuerySet):
+                                if isinstance(selector_value, list | set | tuple):
                                     pks = [getattr(it, 'pk', it) for it in selector_value]
                                 else:
                                     pks = getattr(selector_value, 'pk', selector_value)

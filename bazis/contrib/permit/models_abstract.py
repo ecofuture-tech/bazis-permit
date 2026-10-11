@@ -285,7 +285,8 @@ class PermitSelectorMixin(InitialBase):
     @classmethod
     def get_selector_for_user(cls, user):
         """
-        Class method to be implemented for retrieving selectors specific to a user.
+        The selector source of the user: an object, a list or a queryset of the objects
+        (read as a list), or a false value: the permission matches nothing.
         """
         raise NotImplementedError
 

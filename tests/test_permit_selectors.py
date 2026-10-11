@@ -433,3 +433,55 @@ def test_selector_many_to_many_anonymous(sample_app):
     meeting.participants.add(user)
 
     assert ids(get_api_client(sample_app).get(URL_MEETING)) == []
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('source', ['queryset', 'list', 'object', 'empty queryset'])
+def test_selector_source_queryset(sample_app, no_selector_warnings, monkeypatch, source):
+    """
+    `get_selector_for_user` returns an object, a list or a queryset (the guide): the same
+    objects match through a foreign key (`team`), a many-to-many field (`guest_teams`) and
+    `self`, also in a field permission. A queryset failed in the foreign key, as the exact
+    comparison of one object.
+    """
+
+    def get_selector_for_user(cls, user):
+        qs = cls.objects.filter(watchers=user).order_by('name')
+        return {
+            'queryset': qs,
+            'list': list(qs),
+            'object': qs.first(),
+            'empty queryset': qs.none(),
+        }[source]
+
+    monkeypatch.setattr(Team, 'get_selector_for_user', classmethod(get_selector_for_user))
+    role = role_with(
+        'team_source',
+        'entity.meeting.item.view.team',
+        'entity.meeting.item.view.guest_teams',
+        'entity.meeting.field.view.team.description.disable',
+        'entity.meeting.field.view.guest_teams.description.enable',
+        'entity.team.item.view.self',
+    )
+    core, docs, ops = (Team.objects.create(name=it) for it in ('Core', 'Docs', 'Ops'))
+    watcher = user_with('watcher', role)
+    watcher.teams_watched.add(core, docs)
+    by_core = Meeting.objects.create(title='Core', description='core', team=core)
+    by_docs = Meeting.objects.create(title='Docs', description='docs', team=docs)
+    Meeting.objects.create(title='Ops', team=ops)
+    as_guest = Meeting.objects.create(title='Guest', description='guest')
+    as_guest.guest_teams.add(docs)
+
+    expected = {
+        'queryset': [core, docs], 'list': [core, docs], 'object': [core], 'empty queryset': [],
+    }[source]
+    meetings = {core: by_core, docs: by_docs}
+    shown = [meetings[it] for it in expected] + ([as_guest] if docs in expected else [])
+
+    client = get_api_client(sample_app, watcher.jwt_build())
+    response = client.get(URL_MEETING)
+    assert ids(response) == sorted(str(it.id) for it in shown)
+    descriptions = {it['id']: it['attributes'].get('description') for it in response.json()['data']}
+    for meeting in shown:
+        assert descriptions[str(meeting.id)] == (None if meeting.team else meeting.description)
+    assert ids(client.get(URL_TEAM)) == sorted(str(it.id) for it in expected)
