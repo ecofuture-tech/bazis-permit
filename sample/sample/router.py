@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# the default route of the users (not routed): the users pick other users
+import users.routes  # noqa: F401
+
 from bazis.core.routing import BazisRouter
 
 

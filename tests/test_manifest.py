@@ -45,9 +45,13 @@ def test_relations_view_check(settings):
 
 @pytest.mark.django_db
 def test_routes_without_permissions(sample_app):
+    from bazis.contrib.users.routes import UserRouteSet
+    from bazis.core.routes_abstract.jsonapi.mixins import restrict_queryset_override
+
     warnings = {it.obj.__qualname__ for it in check_routes_permit(None)}
-    # the user routes of bazis-users do not check permissions
-    assert 'UserRouteSet' in warnings
+    # the user routes of bazis-users have a rule of their own from bazis-users 2.9
+    # (`restrict_queryset`: staff every user, another user only himself)
+    assert ('UserRouteSet' in warnings) is (restrict_queryset_override(UserRouteSet) is None)
     assert 'ParentEntityRouteSet' not in warnings
     # declared public
     assert 'RoleRoute' not in warnings
