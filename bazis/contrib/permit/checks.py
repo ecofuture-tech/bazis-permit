@@ -154,6 +154,143 @@ def check_actions_access(app_configs, **kwargs):
     ]
 
 
+def _anonymous_match(selector: str, of_item: bool) -> bool:
+    """
+    Whether a permission with the selector lets an anonymous user call an action: any
+    selector for an action of the collection (it needs a permission on the model), for an
+    action of an item one an anonymous user matches, `all` or a condition without
+    `__selector__` (he is nobody's selector).
+    """
+    from .declare import SELECTOR_NAME
+    from .schemas import PERM_ALL
+
+    if not of_item:
+        return True
+    return selector == PERM_ALL or (
+        not SELECTOR_NAME.match(selector) and '__selector__' not in selector
+    )
+
+
+def anonymous_actions(roles: dict[str, set[str]], source: str) -> list[Warning]:
+    """
+    permit.W008: the custom actions of the permission routes (not public) whose
+    `access_action` the roles for anonymous users have, `roles` (their slug → their
+    permission slugs, from `source`): anonymous users call them. The ids of the list
+    (`/_id/` of the core) are the list in another form and are left out.
+    """
+    from bazis.core.introspect import loaded_app, route_sets
+    from bazis.core.routes_abstract.jsonapi import JsonapiRouteBase
+
+    from .routes_abstract import PermitRouteBase, route_is_action, route_is_item
+    from .schemas import PermitStructMixin
+
+    if not roles or (app := loaded_app()) is None:
+        return []
+    list_ids = JsonapiRouteBase.routes_ctx['action_list_id'].func
+
+    messages = []
+    for route_cls, routes in route_sets(app).items():
+        if not (
+            issubclass(route_cls, PermitRouteBase)
+            and issubclass(route_cls.model, PermitStructMixin)
+        ):
+            continue
+        for action in dict.fromkeys(it['action'] for it in routes):
+            route_ctx = route_cls.routes_ctx[action]
+            if (
+                not route_is_action(route_ctx)
+                or route_ctx.public
+                or route_ctx.access_action is None
+                or route_ctx.func is list_ids
+            ):
+                continue
+            prefix = (
+                f'{route_cls.model.get_resource_label()}.item.{route_ctx.access_action.value}.'
+            )
+            granted = sorted(
+                f'{role} ({slug})'
+                for role, slugs in roles.items()
+                for slug in slugs
+                if slug.startswith(prefix)
+                and _anonymous_match(slug[len(prefix):].split('.')[0], route_is_item(route_ctx))
+            )
+            if granted:
+                messages.append(
+                    Warning(
+                        f'The action {action} of the permission route '
+                        f'{route_cls.__module__}.{route_cls.__qualname__} requires '
+                        f'{prefix}…, which roles for anonymous users ({source}) have: '
+                        f'{", ".join(granted)}. Anonymous users can call it.',
+                        hint=(
+                            'If anonymous users may call it, declare public=True (and restrict '
+                            'what it returns yourself). Otherwise declare an operation of its '
+                            "own as its access_action (a subclass of AccessAction, e.g. "
+                            "REPORT = 'report': the permission <app>.<model>.item.report."
+                            '<selector>) and grant it only to the roles that may call it: '
+                            'access_action=CrudAccessAction.VIEW opens an aggregate or a '
+                            'report to everyone who can view the model.'
+                        ),
+                        obj=route_cls,
+                        id='permit.W008',
+                    )
+                )
+    return messages
+
+
+def _declared_anonymous() -> dict[str, set[str]]:
+    """
+    The roles for anonymous users declared in the `roles.py` modules, with the permissions
+    of their groups.
+    """
+    from .declare import declarations
+
+    groups, roles = declarations()
+    permissions = {it.slug: set(it.permissions) for _module, it in groups}
+    return {
+        role.slug: set().union(*(permissions.get(it, set()) for it in role.groups))
+        for _module, role in roles
+        if role.for_anonymous
+    }
+
+
+@register()
+def check_actions_anonymous(app_configs, **kwargs):
+    """
+    permit.W008 for the roles for anonymous users declared in the `roles.py` modules
+    (`Role(for_anonymous=True)`). Runs when the application is loaded (`manage.py
+    bazis_doctor`).
+    """
+    return anonymous_actions(_declared_anonymous(), 'roles.py')
+
+
+@register(Tags.database)
+def check_actions_anonymous_applied(app_configs, databases=None, **kwargs):
+    """
+    permit.W008 for the roles for anonymous users of the database (made in the admin or the
+    API, or the groups the admin attached to a declared role): their permissions that the
+    declarations do not give, which `check_actions_anonymous` reports. Skipped while
+    migrations are not applied.
+    """
+    from django.apps import apps
+
+    from bazis.core.declare import migrations_complete
+
+    declared = _declared_anonymous()
+    roles = {}
+    for using in databases or ():
+        if not migrations_complete(using):
+            continue
+        for role, slug in (
+            apps.get_model('permit.Role')
+            .objects.using(using)
+            .filter(for_anonymous=True, groups_permission__permissions__isnull=False)
+            .values_list('slug', 'groups_permission__permissions__slug')
+        ):
+            if slug not in declared.get(role, ()):
+                roles.setdefault(role, set()).add(slug)
+    return anonymous_actions(roles, 'the database')
+
+
 @register()
 def check_declarations(app_configs, **kwargs):
     """

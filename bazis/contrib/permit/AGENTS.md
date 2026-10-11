@@ -268,6 +268,31 @@ class CertificateRouteSet(PermitRouteBase):
   `set_item(item_id, with_lock=True)` (the item is read again, locked; the permission was
   checked before the action on the unlocked item, so a GET action must not rely on a
   permission that depends on fields another request may change meanwhile). The core `/_id/` route declares `access_action=view`: open as `GET /`.
+- **An aggregate or a report** (a count, a funnel, a time to close, an export):
+  `access_action=CrudAccessAction.VIEW` lets everyone who can view the model call it, the
+  roles for anonymous users and the narrowest role that views an object among them, and
+  the action returns what its code computes, not what each of them may see. Give it an
+  operation of its own (`REPORT`, below) granted only to the roles that may see the
+  report, and compute it over the objects the user views, by the `restrict_queryset` of
+  the default route of their model with the user of the request; `permit.W008`
+  (`bazis_doctor`) reports an action whose `access_action` a role for anonymous users
+  has:
+
+  ```python
+  @http_get('/{item_id}/funnel/', access_action=VacancyAccessAction.REPORT)
+  def action_funnel(self, item_id: str, **kwargs):
+      visible = ApplicationRouteSet.restrict_queryset(
+          Application.objects.all(), CrudAccessAction.VIEW, user=self.inject.user)
+      # the candidates of the vacancy the user views, not all of them
+      qs = Application.objects.filter(vacancy=self.item, pk__in=visible.values('pk'))
+      return dict(qs.values_list('stage').annotate(total=Count('id')))
+
+  # jobs/roles.py: the recruiter of the vacancy and the managers, not the guest
+  'jobs.vacancy.item.report.recruiter',
+  'jobs.vacancy.item.report.all',
+  ```
+
+  An action anonymous users may call is `public=True`.
 - Neither (or `public=False`): authenticated users only, anonymous ones get 403
   `ERR_FORBIDDEN` (as on a create or an update), whatever their roles. Without a
   declaration `permit.W007` warns, for an action of the collection and of an item: declare
@@ -324,7 +349,9 @@ class CertificateRouteSet(PermitRouteBase):
   neither). Only a route of public data declares `permit_public = True`.
 - Every custom action declares `access_action` or `public` (`permit.W007`); an action open
   to anonymous users is `public=True`, and an action closed to them needs no check of
-  `is_anonymous` in its code.
+  `is_anonymous` in its code. An aggregate or a report has an operation of its own
+  (`AccessAction`), not `CrudAccessAction.VIEW`, which every role that views the model
+  has, the roles for anonymous users among them (`permit.W008`).
 - The model of a `PermitRouteBase` route is a `PermitModelMixin` (a `PermitStructMixin`):
   with another model the route and the relations into it fail with `AttributeError` as
   soon as the user has a permission on the model (`permit.W003`, a warning).

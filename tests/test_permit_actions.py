@@ -29,7 +29,7 @@ from bazis_test_utils.utils import get_api_client
 from entity.models import Team
 from entity.routes import TeamRouteSet
 
-from bazis.contrib.permit.models import Role
+from bazis.contrib.permit.models import Permission, Role
 from bazis.contrib.permit.routes_abstract import PermitRouteBase, route_is_action
 from bazis.core.routes_abstract.initial import (
     OPENAPI_EXTENSION,
@@ -397,3 +397,122 @@ def test_custom_actions_meta_anonymous(sample_app, team):
     Role.objects.filter(for_anonymous=True).delete()
     # without the role he cannot list the teams
     assert client.get(URL_TEAM, params={'meta': 'custom_actions'}).status_code == 403
+
+
+
+def w008(messages) -> dict[str, str]:
+    """The actions permit.W008 reports, with their messages."""
+    assert {it.id for it in messages} <= {'permit.W008'}
+    return {it.msg.split(' ', 3)[2]: it.msg for it in messages}
+
+
+@pytest.fixture
+def declared_anonymous(monkeypatch):
+    """
+    Declares in the roles.py modules a role for anonymous users (`anon`) and a role of the
+    users (`staff`), both with the permissions given.
+    """
+    from bazis.contrib.permit import declare
+
+    def declared(*slugs):
+        groups = [declare.Group('anon_group', 'Anonymous', slugs),
+                  declare.Group('staff_group', 'Staff', slugs)]
+        roles = [declare.Role('anon', 'Anonymous', [groups[0]], for_anonymous=True),
+                 declare.Role('staff', 'Staff', [groups[1]])]
+        monkeypatch.setattr(
+            declare,
+            'declarations',
+            lambda: ([('roles', it) for it in groups], [('roles', it) for it in roles]),
+        )
+
+    return declared
+
+
+def test_w008_declared_roles(sample_app, declared_anonymous):
+    """
+    permit.W008: a custom action (not public) whose `access_action` a role for anonymous
+    users declared in roles.py has: anonymous users call it (an aggregate with
+    `CrudAccessAction.VIEW` is open to whoever views the model). An action of the
+    collection needs a permission with any selector, one of an item a selector an anonymous
+    user matches (`all`). Not reported: the public actions (`motto`, `count` declared public
+    on `TeamGuestRouteSet`), those without `access_action` (`card`), the ids of the list
+    (`/_id/`), the roles of the users.
+    """
+    from bazis.contrib.permit import checks
+
+    assert checks.check_actions_anonymous(None) == []
+
+    declared_anonymous('entity.team.item.view.all')
+    found = w008(checks.check_actions_anonymous(None))
+    assert sorted(found) == ['action_count', 'action_digest']
+    assert 'entity.routes.TeamRouteSet' in found['action_count']
+    assert 'anon (entity.team.item.view.all)' in found['action_count']
+    assert 'staff' not in found['action_count']
+    assert 'roles.py' in found['action_count']
+
+    # an action of the collection: a permission with any selector
+    declared_anonymous('entity.team.item.view.members')
+    assert sorted(w008(checks.check_actions_anonymous(None))) == ['action_count', 'action_digest']
+
+    # an action of an item: only a selector an anonymous user matches
+    declared_anonymous('entity.team.item.report.members', 'entity.team.item.change.members')
+    assert w008(checks.check_actions_anonymous(None)) == {}
+    declared_anonymous('entity.team.item.report.all', 'entity.team.item.change.all')
+    found = w008(checks.check_actions_anonymous(None))
+    assert sorted(found) == ['action_rename', 'action_report']
+    assert 'entity.team.item.report.' in found['action_report']
+
+
+@pytest.mark.django_db(transaction=True)
+def test_w008_follows_route_check(sample_app, team):
+    """
+    What permit.W008 reports is what route_check allows: an anonymous user with a role for
+    anonymous users having `entity.team.item.view.members` (a selector he never matches)
+    calls the actions of the collection with `access_action=view`; with
+    `entity.team.item.report.members` not the action of an item `report`, with
+    `entity.team.item.report.all` he does.
+    """
+    client = get_api_client(sample_app)
+    role = role_with('team_guest', 'entity.team.item.view.members')
+    role.for_anonymous = True
+    role.save()
+    response = client.get(f'{URL_TEAM}count/')
+    assert (response.status_code, response.json()) == (200, 0)
+
+    Role.objects.filter(for_anonymous=True).delete()
+    role = role_with('team_report', 'entity.team.item.view.all', 'entity.team.item.report.members')
+    role.for_anonymous = True
+    role.save()
+    assert client.get(f'{URL_TEAM}{team.id}/report/').status_code == 403
+    role.groups_permission.first().permissions.add(
+        Permission.objects.get_or_create(slug='entity.team.item.report.all')[0]
+    )
+    assert client.get(f'{URL_TEAM}{team.id}/report/').status_code == 200
+
+
+@pytest.mark.django_db(transaction=True)
+def test_w008_roles_of_the_database(sample_app, declared_anonymous):
+    """
+    permit.W008 for the roles for anonymous users of the database (the admin, the API):
+    with the database checks, the permissions the declarations do not give (those are
+    reported by the check of roles.py, not twice).
+    """
+    from bazis.contrib.permit import checks
+
+    assert checks.check_actions_anonymous_applied(None, databases=['default']) == []
+    role = role_with('team_guest', 'entity.team.item.view.all')
+    role.for_anonymous = True
+    role.save()
+    role_with('team_staff', 'entity.team.item.report.all')
+
+    assert checks.check_actions_anonymous_applied(None) == []
+    found = w008(checks.check_actions_anonymous_applied(None, databases=['default']))
+    assert sorted(found) == ['action_count', 'action_digest']
+    assert 'team_guest (entity.team.item.view.all)' in found['action_count']
+    assert 'the database' in found['action_count']
+
+    # declared (and applied): reported by the check of roles.py only
+    declared_anonymous('entity.team.item.view.all')
+    Role.objects.filter(slug='team_guest').update(slug='anon')
+    assert checks.check_actions_anonymous_applied(None, databases=['default']) == []
+    assert sorted(w008(checks.check_actions_anonymous(None))) == ['action_count', 'action_digest']

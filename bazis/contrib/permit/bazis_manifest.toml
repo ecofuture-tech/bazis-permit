@@ -85,6 +85,10 @@ text = "a custom action of a PermitRouteBase (of the collection or of an item) w
 check = "permit.W007"
 
 [[pitfalls]]
+text = "a custom action with access_action=CrudAccessAction.VIEW is open to every role that views the model, the roles for anonymous users and the narrowest roles among them: an aggregate or a report (a count, a funnel, an export) needs an operation of its own (an AccessAction subclass, REPORT = 'report') granted only to the roles that may see it, and counts only the objects the user views (restrict_queryset of the default route of their model); an action anonymous users may call is public=True"
+check = "permit.W008"
+
+[[pitfalls]]
 text = "QuerySet.update() and bulk_create() on roles, groups and permissions do not invalidate the permission cache"
 
 [[pitfalls]]
