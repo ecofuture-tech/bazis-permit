@@ -260,10 +260,13 @@ per operation (`view`, `add`, `change`) and selector:
   (the creator, the owner): make the model field optional (`blank=True`, `null=True` or a
   default), set it in `hook_before_create` of the route (call `super()`), then disable it
   for the role. `bazis_doctor` warns of such a declaration in `roles.py` (`permit.W009`).
-  `disable` on `change` hides any field from the update schema, required or not (bazis
-  2.16): an update with it is 422, its relationships endpoints answer 403
-  `ERR_RELATIONSHIP_READONLY`. Before bazis 2.16 a field required in the model stayed in
-  the update schema and an update changed it: there declare `readonly` on `change`.
+  `disable` on `change` hides a field from the update schema whatever its requiredness in
+  the model (bazis 2.16): an update with it is 422, its relationships endpoints answer 403
+  `ERR_RELATIONSHIP_READONLY`. The one exception: `<field>.required` keeps the field
+  against `__all__.disable` (the permission names it); the field's own `disable` always
+  wins, also over its own `required` from another group of the user. Before bazis 2.16 a
+  field required in the model stayed in the update schema and an update changed it: there
+  declare `readonly` on `change`.
 - **The filter, the sorting and the search.** With Bazis 2.9 the `filter`, `sort` and
   `search` of a request reach only the fields the field permissions show the user in
   every object: `PermitRouteBase.query_fields(user=None,

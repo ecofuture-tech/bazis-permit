@@ -396,8 +396,9 @@ def test_disable_of_a_required_field_on_add_is_reported(sample_app):
 
 def test_disable_of_a_required_field_on_change_is_not_reported(sample_app):
     """
-    The update schema hides a disabled field whatever its requiredness (bazis 2.16): a
-    `change` permission is not reported, with `__all__` either.
+    The update schema hides a field its own `disable` hides whatever its requiredness in
+    the model (bazis 2.16; `<field>.required` keeps a field only against `__all__.disable`,
+    which the permission asks for): a `change` permission is not reported.
     """
     for slug in (
         'entity.meeting.field.change.author.title.disable',

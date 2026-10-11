@@ -22,6 +22,9 @@ it in the create schema: an item cannot be created without it.
 import pytest
 from bazis_test_utils.utils import get_api_client
 from entity.models import DependentEntity, Meeting
+from translated_fields import to_attribute
+
+from bazis.contrib.permit.models import GroupPermission, Permission, Role
 
 from tests import factories
 
@@ -245,3 +248,70 @@ def test_change_disable_of_required_relation(sample_app):
     )
     assert response.status_code in (200, 204), response.content
     assert DependentEntity.objects.get(id=dependent.id).parent_entity_id == other.id
+
+
+def client_with_groups(sample_app, name: str, *groups: tuple[str, ...]):
+    """A user whose role has a permission group for each tuple of `groups`."""
+    role = Role.objects.create(slug=name, **{to_attribute('name'): name})
+    for i, slugs in enumerate(groups):
+        group = GroupPermission.objects.create(slug=f'{name}_{i}', **{to_attribute('name'): name})
+        for slug in slugs:
+            group.permissions.add(Permission.objects.get_or_create(slug=slug)[0])
+        role.groups_permission.add(group)
+    user = user_with(name, role)
+    return get_api_client(sample_app, user.jwt_build())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_change_own_required_against_disable_of_all(sample_app):
+    """
+    `<field>.required` keeps the field against `__all__.disable` on change (the permission
+    names it): the update writes it, the other fields are hidden.
+    """
+    meeting = Meeting.objects.create(title='Planning', description='Notes')
+    client = client_with(
+        sample_app,
+        'editor',
+        *MEETING,
+        'entity.meeting.field.change.all.__all__.disable',
+        'entity.meeting.field.change.all.description.required',
+    )
+
+    fields = update_fields(client, f'{URL_MEETING}{meeting.id}/')
+    assert 'description' in fields
+    assert 'title' not in fields
+    response = client.patch(
+        f'{URL_MEETING}{meeting.id}/', json_data=meeting_patch(meeting, description='Changed')
+    )
+    assert response.status_code == 200, response.content
+    response = client.patch(f'{URL_MEETING}{meeting.id}/', json_data=meeting_patch(meeting, title='Hijacked'))
+    assert response.status_code == 422, response.content
+    meeting.refresh_from_db()
+    assert (meeting.title, meeting.description) == ('Planning', 'Changed')
+
+
+@pytest.mark.django_db(transaction=True)
+def test_change_own_disable_wins_over_own_required_of_another_group(sample_app):
+    """
+    The restrictions of the groups of a user are merged: `<field>.required` of one group
+    does not keep the field `<field>.disable` of another hides, also against
+    `__all__.disable`.
+    """
+    meeting = Meeting.objects.create(title='Planning', description='Notes')
+    for extra in ((), ('entity.meeting.field.change.all.__all__.disable',)):
+        Role.objects.all().delete()
+        GroupPermission.objects.all().delete()
+        client = client_with_groups(
+            sample_app,
+            f'editor{len(extra)}',
+            (*MEETING, 'entity.meeting.field.change.all.description.required', *extra),
+            ('entity.meeting.field.change.all.description.disable',),
+        )
+
+        assert 'description' not in update_fields(client, f'{URL_MEETING}{meeting.id}/')
+        response = client.patch(
+            f'{URL_MEETING}{meeting.id}/', json_data=meeting_patch(meeting, description='Hijacked')
+        )
+        assert response.status_code == 422, response.content
+        meeting.refresh_from_db()
+        assert meeting.description == 'Notes'

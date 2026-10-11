@@ -316,8 +316,9 @@ def required_disabled(groups) -> list[Warning]:
     permit.W009: the field permissions `field.add.….<field>.disable` of the declared
     `groups` that do not hide their field, because the core keeps a field required to
     create an item in the create schema (`fields_patch`): a request without it is 422. The
-    update schema hides a disabled field whatever its requiredness (bazis 2.16), so a
-    `change` permission is not concerned. Their restrictions are combined per model and
+    update schema hides a field its own `disable` hides whatever its requiredness (bazis
+    2.16; `<field>.required` keeps it only against `__all__.disable`, as the permission
+    names it), so a `change` permission is not concerned. Their restrictions are combined per model and
     condition, as one user with the group gets them, and checked against the create
     schemas of the permission routes of the model.
     """
