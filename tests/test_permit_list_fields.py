@@ -329,3 +329,62 @@ def test_every_field_hidden(sample_app, meetings):
     assert response.status_code == 200, response.content
     for it in response.json().get('included', []):
         assert not it.get('attributes') and not it.get('relationships')
+
+
+#: a public subset of the fields: the role views the objects of a condition and shows only
+#: the title in them, under the same condition (as `item.view.all.open` with
+#: `field.view.all.open.__all__.disable` of a role for anonymous users)
+PUBLIC_SUBSET = [
+    'entity.meeting.field.view.title=Sync.__all__.disable',
+    'entity.meeting.field.view.title=Sync.title.enable',
+]
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('anonymous', [False, True])
+def test_schema_list_has_the_combinations_of_the_objects_viewed(sample_app, meetings, anonymous):
+    """
+    The members of `schema_list` are the combinations of the conditional field groups an
+    object the user views may match: with the view under the condition of the field group,
+    no object he views is outside the group, so the combination without it (every field)
+    is left out and the union names only the fields shown (it named the hidden ones).
+    """
+    name = f'public_subset_{int(anonymous)}'
+    role = role_ordered(name, ['entity.meeting.item.view.title=Sync', *PUBLIC_SUBSET], False)
+    if anonymous:
+        role.for_anonymous = True
+        role.save()
+        client = get_api_client(sample_app)
+    else:
+        client = get_api_client(sample_app, user_with(name, role).jwt_build())
+
+    members = schema_list_members(client)
+    assert members and all(it == {'title'} for it in members)
+    result = list_and_cards(client)
+    assert [card for __, card in result.values()] == [{'title'}]
+    assert all(listed == card for listed, card in result.values())
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    'views',
+    [
+        ['entity.meeting.item.view.all'],
+        ['entity.meeting.item.view.title=Retro'],
+        ['entity.meeting.item.view.title=Sync', 'entity.meeting.item.view.title=Retro'],
+    ],
+)
+def test_schema_list_keeps_the_combinations_maybe_viewed(sample_app, meetings, views):
+    """
+    A view permission whose condition is no field group's (none: every object; another
+    condition, also besides that of the group) leaves the combination without the group:
+    the objects outside it show every field, and the union names them.
+    """
+    role = role_ordered('maybe_viewed', [*views, *PUBLIC_SUBSET], False)
+    client = get_api_client(sample_app, user_with('maybe_viewed', role).jwt_build())
+
+    first, *__ = schema_list_members(client)
+    assert {'title', 'description', 'team'} <= first
+    result = list_and_cards(client)
+    assert all(listed == card for listed, card in result.values())
+    assert set().union(*(listed for listed, __ in result.values())) <= first

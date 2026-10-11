@@ -138,6 +138,26 @@ def field_groups_combination(unconditional, conditional, mask: int) -> list[dict
     return values
 
 
+def field_groups_reachable(handler, conditional) -> list[int]:
+    """
+    The combinations (masks) of the conditional field groups that an object the user views
+    may match. An object he views matches a condition of his view permissions
+    (`perms_item`): when each of these conditions is the condition of a conditional field
+    group (the same selector and status, `item.view.all.open` and
+    `field.view.all.open.…`), a combination without any of these groups is matched by no
+    object he views (a role for anonymous users does not see the fields of the other
+    statuses). The conditions are compared as they are, not by what they imply: a view
+    permission whose condition is no field group's (or none) leaves every combination.
+    """
+    bits = {hash(cond): bit for bit, (__, cond) in enumerate(conditional)}
+    required = 0
+    for __, cond in handler.perms_item:
+        if not cond or (bit := bits.get(hash(cond))) is None:
+            return list(range(1 << len(conditional)))
+        required |= 1 << bit
+    return [mask for mask in range(1 << len(conditional)) if mask & required]
+
+
 def fields_shown_everywhere(factory, handler) -> list['SchemaField']:
     """
     The fields of the schema factory that the field permissions of the handler show in every
@@ -350,13 +370,13 @@ class SchemasPermit(UserDict):
     def build_schema_list(self):
         """
         The schema of a list: a resource schema for each combination of the conditional
-        field groups an object may match (`_schema_key`, the bits of the combination set by
-        `restrict_queryset`), with the field permissions of the groups without a condition
-        and of the groups of the combination, as the card of the object. Over
-        `FIELD_GROUPS_COMBINED_MAX` conditional groups, and for an object without
-        `_schema_key`, the fields shown in every object (`fields_shown_everywhere`). The
-        first member is the union of the fields of the others (`SCHEMA_KEY_UNION`, no
-        object has it): a client takes its columns from it.
+        field groups an object the user views may match (`_schema_key`, the bits of the
+        combination set by `restrict_queryset`; `field_groups_reachable`), with the field
+        permissions of the groups without a condition and of the groups of the combination,
+        as the card of the object. Over `FIELD_GROUPS_COMBINED_MAX` conditional groups, and
+        for an object without `_schema_key`, the fields shown in every object
+        (`fields_shown_everywhere`). The first member is the union of the fields of the
+        others (`SCHEMA_KEY_UNION`, no object has it): a client takes its columns from it.
         """
         helper = self.get_helper(CrudApiAction.LIST)
         factory = helper.schema_factory
@@ -364,7 +384,7 @@ class SchemasPermit(UserDict):
 
         variants = {None: fields_shown_everywhere(factory, helper.permit_handler)}
         if len(conditional) <= FIELD_GROUPS_COMBINED_MAX:
-            for mask in range(1 << len(conditional)):
+            for mask in field_groups_reachable(helper.permit_handler, conditional):
                 values = field_groups_combination(unconditional, conditional, mask)
                 variants[mask] = factory.fields_patch(fields_restricts_collect(values))
         names = {f.name for fields in variants.values() for f in fields}

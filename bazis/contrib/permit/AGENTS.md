@@ -170,7 +170,14 @@ class DocumentRouteSet(PermitRouteBase):
   per combination, at most 16); with more, the list shows every object with the fields
   shown in all of them (the card shows more), so keep the conditions of a role few. The
   first member of `schema_list` (`anyOf[0]` of `data.items`) is the union of the fields
-  some object of the list may show, the columns of a client; no object has it. One field writable, the others read-only (a model with statuses has the
+  some object of the list may show, the columns of a client; no object has it. The members
+  are the combinations an object the user views may match: when the condition of each of
+  his view permissions is that of a conditional field group (`item.view.all.open` with
+  `field.view.all.open.__all__.disable`, a role for anonymous users), a combination without
+  these groups is left out, and the union names only the fields of the open objects. The
+  conditions are compared as written, not by what they imply: with a view permission of
+  another condition (or none) the union may name a field that no object the user views
+  shows (its name, never a value). One field writable, the others read-only (a model with statuses has the
   status segment, `client.all.__all__.readonly`):
 
   ```python
