@@ -33,7 +33,7 @@ classifiers = [
     "Framework :: FastAPI",
 ]
 dependencies = [
-    "bazis>=2.7.0",  # raise to >=2.16.0 at the release: public/access_action of the actions, throttle, bazis.core.declare, get_fields_hidden
+    "bazis>=2.7.0",  # raise to >=2.16.0 at the release: public/access_action of the actions, throttle, bazis.core.declare, get_fields_hidden, the update schema hides a disabled required field
     "bazis-users>=2.3.0",
 ]
 

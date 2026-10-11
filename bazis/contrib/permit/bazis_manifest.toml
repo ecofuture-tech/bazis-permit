@@ -86,7 +86,7 @@ text = "an aggregate or a report with access_action=CrudAccessAction.VIEW is ope
 check = "permit.W008"
 
 [[pitfalls]]
-text = "`disable` on add or change hides only an optional field: a required one stays in the create and update schemas; fill it on the server or use readonly"
+text = "`disable` on add hides only an optional field: a required one stays in the create schema; fill it on the server (on change `disable` hides any field)"
 check = "permit.W009"
 
 [[pitfalls]]

@@ -15,7 +15,7 @@ with roles needs Model of permissions, Roles in the code, Setup and Rules.
 | Model of permissions | you write the permissions: the slug `<app>.<model>.<item\|field>.<operation>.<selector>…`, the operations, the selectors (`all`, `self`, `author`, a relation, a path), the roles of a user, the roles for anonymous users |
 | Roles in the code (`roles.py`) | you declare the roles and the permission groups: `Group`, `Role`, what `migrate` applies, the data migrations, the tests, the checks `permit.E004`, `E005`, `W005`, `W006`, `W009` |
 | Setup | you protect a model: the mixins of the user, the anonymous user and the models, `PermitRouteBase`, the 404 and 403 of the items, the selector arrays, the settings, the users, another route of a protected model, `restrict_queryset` |
-| Field permissions | a role must not see or write some fields: `disable`, `readonly`, `enable`, `__all__`, the fields of a list, a required field on a write (`permit.W009`), the fields the filter, sort and search reach |
+| Field permissions | a role must not see or write some fields: `disable`, `readonly`, `enable`, `__all__`, the fields of a list, a required field on a create (`permit.W009`), the fields the filter, sort and search reach |
 | Custom actions | an action that is no CRUD: `access_action`, `public`, an aggregate or a report, the actions a user may call (`?meta=custom_actions`), an operation of its own (`AccessAction`) |
 | Rules | before you write the code, once: what every route, action and override must respect, the cache of the permissions |
 
@@ -117,9 +117,9 @@ ROLES = [Role('client', _('Client'), [CLIENT])]    # groups: Group objects or sl
 - Checks: `permit.E004` (a slug, a duplicate, a group of a role that is not declared),
   `permit.E005` (a permission: grammar, the model is a `PermitModelMixin`, the selector is
   a relation to a `PermitSelectorMixin` model, the field exists, the restriction is
-  `enable`/`disable`/`readonly`/`filter:`), `permit.W009` (`bazis_doctor`: a `disable` of
-  a field that the schema of the write keeps, see Field permissions); with a database
-  (`bazis_doctor` from bazis 2.13, against the database it reaches; with an older core only
+  `enable`/`disable`/`readonly`/`filter:`), `permit.W009` (`bazis_doctor`: a `disable` on
+  add of a required field, which the create schema keeps, see Field permissions); with a
+  database (`bazis_doctor` from bazis 2.13, against the database it reaches; with an older core only
   `manage.py check --database default`) `permit.W005` (the database differs: migrate) and
   `permit.W006` (orphans). These are warnings: `migrate` runs the
   database checks before it applies the declarations.
@@ -252,16 +252,18 @@ per operation (`view`, `add`, `change`) and selector:
   objects. The conditions are compared as written, not by what they imply: with a view
   permission of another condition (or none) the union may name a field that no object
   the user views shows (its name, never a value).
-- **A required field cannot be hidden from a write.** `disable` hides a field from the
-  schemas of writing only when it is optional: a field required to create an item (a model
-  field without `blank=True`, `null=True` or a default) stays in the create schema of the
-  role, so `field.add.<selector>.<field>.disable` changes nothing and a create without the
-  field is 422 `ERR_VALIDATE` "Field required" at it; a field required in the model also
-  stays in the update schema, and an update still changes it. A field the server fills
+- **A required field cannot be hidden from a create.** `disable` on `add` hides a field
+  from the create schema only when it is optional: a field required to create an item (a
+  model field without `blank=True`, `null=True` or a default) stays in the create schema
+  of the role, so `field.add.<selector>.<field>.disable` changes nothing and a create
+  without the field is 422 `ERR_VALIDATE` "Field required" at it. A field the server fills
   (the creator, the owner): make the model field optional (`blank=True`, `null=True` or a
   default), set it in `hook_before_create` of the route (call `super()`), then disable it
-  for the role; a required field a role must not change: `readonly` on `change` (an update
-  ignores it). `bazis_doctor` warns of such a declaration in `roles.py` (`permit.W009`).
+  for the role. `bazis_doctor` warns of such a declaration in `roles.py` (`permit.W009`).
+  `disable` on `change` hides any field from the update schema, required or not (bazis
+  2.16): an update with it is 422, its relationships endpoints answer 403
+  `ERR_RELATIONSHIP_READONLY`. Before bazis 2.16 a field required in the model stayed in
+  the update schema and an update changed it: there declare `readonly` on `change`.
 - **The filter, the sorting and the search.** With Bazis 2.9 the `filter`, `sort` and
   `search` of a request reach only the fields the field permissions show the user in
   every object: `PermitRouteBase.query_fields(user=None,

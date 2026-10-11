@@ -394,19 +394,23 @@ def test_disable_of_a_required_field_on_add_is_reported(sample_app):
     assert messages[0].obj == 'app.roles'
 
 
-def test_disable_of_a_required_field_on_change_is_reported(sample_app):
+def test_disable_of_a_required_field_on_change_is_not_reported(sample_app):
     """
-    The update schema keeps a required field too, and an update changes it: `readonly` is
-    the restriction that keeps it unchanged.
+    The update schema hides a disabled field whatever its requiredness (bazis 2.16): a
+    `change` permission is not reported, with `__all__` either.
     """
-    title = 'entity.meeting.field.change.author.title.disable'
-    assert disabled_required(sample_app, title) == [(title, 'title')]
-    messages = required_disabled([('app.roles', Group('decl', 'Decl', [title]))])
-    assert 'an update still changes it' in messages[0].msg
-    assert '`readonly`' in messages[0].hint
-
-    assert disabled_required(sample_app, 'entity.meeting.field.change.author.title.readonly') == []
-    assert disabled_required(sample_app, 'entity.meeting.field.change.author.description.disable') == []
+    for slug in (
+        'entity.meeting.field.change.author.title.disable',
+        'entity.meeting.field.change.all.__all__.disable',
+        'entity.meeting.field.change.author.title.readonly',
+        'entity.meeting.field.change.author.description.disable',
+    ):
+        assert disabled_required(sample_app, slug) == []
+    # the add permission of the same group is reported alone
+    title = 'entity.meeting.field.add.author.title.disable'
+    assert disabled_required(
+        sample_app, title, 'entity.meeting.field.change.author.title.disable'
+    ) == [(title, 'title')]
 
 
 def test_disable_of_all_fields_reports_the_required_ones_not_shown(sample_app):

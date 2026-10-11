@@ -313,13 +313,13 @@ def _disabled_by(field: str, restricts: dict[str, set[str]]) -> str | None:
 
 def required_disabled(groups) -> list[Warning]:
     """
-    permit.W009: the field permissions `field.add|change.….<field>.disable` of the declared
-    `groups` that do not hide their field, because the core hides only an optional field
-    from the schemas of writing (`fields_patch`): a field required to create an item stays
-    in the create schema (and a request without it is 422), and in the update schema, which
-    still accepts it. Their restrictions are combined per model, operation and condition,
-    as one user with the group gets them, and checked against the schemas of the
-    permission routes of the model.
+    permit.W009: the field permissions `field.add.….<field>.disable` of the declared
+    `groups` that do not hide their field, because the core keeps a field required to
+    create an item in the create schema (`fields_patch`): a request without it is 422. The
+    update schema hides a disabled field whatever its requiredness (bazis 2.16), so a
+    `change` permission is not concerned. Their restrictions are combined per model and
+    condition, as one user with the group gets them, and checked against the create
+    schemas of the permission routes of the model.
     """
     from bazis.core.introspect import loaded_app, route_sets
     from bazis.core.schemas import CrudApiAction
@@ -329,31 +329,30 @@ def required_disabled(groups) -> list[Warning]:
 
     if (app := loaded_app()) is None:
         return []
-    actions = {'add': CrudApiAction.CREATE, 'change': CrudApiAction.UPDATE}
     routes = [it for it in route_sets(app) if issubclass(it, PermitRouteBase)]
 
     messages = []
     for module, group in groups:
         if not isinstance(group, Group):
             continue
-        # (model, operation, condition) → the restrictions and the permissions of each field
+        # (model, condition) → the restrictions and the permissions of each field
         found: dict[tuple, tuple[dict[str, set[str]], dict[str, list[str]]]] = {}
         for slug in dict.fromkeys(group.permissions):
             parts = slug.split('.')
-            if parts[2:3] != ['field'] or parts[3] not in actions or permission_problem(slug):
+            if parts[2:4] != ['field', 'add'] or permission_problem(slug):
                 continue
             model = _model(parts[0], parts[1])
             status = 1 if hasattr(model, 'get_status_field') else 0
             field = parts[5 + status]
-            key = (model, parts[3], tuple(parts[4:5 + status]))
+            key = (model, tuple(parts[4:5 + status]))
             restricts, slugs = found.setdefault(key, ({}, {}))
             restricts.setdefault(field, set()).update('.'.join(parts[6 + status:]).split('|'))
             slugs.setdefault(field, []).append(slug)
 
         reported = set()
-        for (model, operation, _condition), (restricts, slugs) in found.items():
+        for (model, _condition), (restricts, slugs) in found.items():
             for route_cls in routes:
-                factory = route_cls.schema_factories.get(actions[operation])
+                factory = route_cls.schema_factories.get(CrudApiAction.CREATE)
                 if route_cls.model is not model or factory is None:
                     continue
                 # fields_patch changes the sets it is given
@@ -365,36 +364,25 @@ def required_disabled(groups) -> list[Warning]:
                         if (slug, field.source) in reported:
                             continue
                         reported.add((slug, field.source))
-                        messages.append(_required_disabled(
-                            slug, group.slug, field.source, operation, route_cls, module
-                        ))
+                        messages.append(
+                            _required_disabled(slug, group.slug, field.source, route_cls, module)
+                        )
     return messages
 
 
-def _required_disabled(slug, group, field, operation, route_cls, module) -> Warning:
+def _required_disabled(slug, group, field, route_cls, module) -> Warning:
     route = f'{route_cls.__module__}.{route_cls.__qualname__}'
-    if operation == 'add':
-        text = (
-            f'The permission {slug} of the group {group} does not hide the field {field}: '
-            f'{route_cls.model._meta.label}.{field} is required, so the create schema of '
-            f'{route} keeps it and a request without it is refused (422).'
-        )
-        hint = (
-            '`disable` hides only an optional field. To fill the field on the server, make it '
-            'optional in the model (blank=True, null=True or a default) and set it in '
-            'hook_before_create of the route (or by the default); otherwise let the role send '
-            'it and remove the permission.'
-        )
-    else:
-        text = (
-            f'The permission {slug} of the group {group} does not hide the field {field}: '
-            f'{route_cls.model._meta.label}.{field} is required, so the update schema of '
-            f'{route} keeps it and an update still changes it.'
-        )
-        hint = (
-            '`disable` hides only an optional field. Declare the field `readonly` for the '
-            'role instead (an update ignores it), or make it optional in the model.'
-        )
+    text = (
+        f'The permission {slug} of the group {group} does not hide the field {field}: '
+        f'{route_cls.model._meta.label}.{field} is required, so the create schema of '
+        f'{route} keeps it and a request without it is refused (422).'
+    )
+    hint = (
+        '`disable` hides only an optional field on add. To fill the field on the server, '
+        'make it optional in the model (blank=True, null=True or a default) and set it in '
+        'hook_before_create of the route (or by the default); otherwise let the role send '
+        'it and remove the permission.'
+    )
     return Warning(text, hint=hint, obj=module, id='permit.W009')
 
 
