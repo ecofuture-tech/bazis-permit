@@ -283,7 +283,8 @@ class CertificateRouteSet(PermitRouteBase):
   report, and compute it over the objects the user views, by the `restrict_queryset` of
   the default route of their model with the user of the request; `permit.W008`
   (`bazis_doctor`) reports an action whose `access_action` a role for anonymous users
-  has:
+  has (for an action of an item, with `all` or a condition he may match, also an
+  alternative such as `author=__selector__|is_public=true`):
 
   ```python
   @http_get('/{item_id}/funnel/', access_action=VacancyAccessAction.REPORT)

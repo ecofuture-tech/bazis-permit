@@ -462,6 +462,17 @@ def test_w008_declared_roles(sample_app, declared_anonymous):
     assert sorted(found) == ['action_rename', 'action_report']
     assert 'entity.team.item.report.' in found['action_report']
 
+    # a condition: with `__selector__` only, it matches no anonymous user; with an
+    # alternative or a negation it may (not evaluated: reported)
+    declared_anonymous('entity.team.item.report.members=__selector__&name=Core')
+    assert w008(checks.check_actions_anonymous(None)) == {}
+    declared_anonymous('entity.team.item.report.name=Core')
+    assert sorted(w008(checks.check_actions_anonymous(None))) == ['action_report']
+    declared_anonymous('entity.team.item.report.members=__selector__|name=Core')
+    assert sorted(w008(checks.check_actions_anonymous(None))) == ['action_report']
+    declared_anonymous('entity.team.item.report.~members=__selector__')
+    assert sorted(w008(checks.check_actions_anonymous(None))) == ['action_report']
+
 
 @pytest.mark.django_db(transaction=True)
 def test_w008_follows_route_check(sample_app, team):
@@ -470,7 +481,8 @@ def test_w008_follows_route_check(sample_app, team):
     anonymous users having `entity.team.item.view.members` (a selector he never matches)
     calls the actions of the collection with `access_action=view`; with
     `entity.team.item.report.members` not the action of an item `report`, with
-    `entity.team.item.report.all` he does.
+    `entity.team.item.report.all` or a condition with an alternative without
+    `__selector__` he does.
     """
     client = get_api_client(sample_app)
     role = role_with('team_guest', 'entity.team.item.view.members')
@@ -487,6 +499,17 @@ def test_w008_follows_route_check(sample_app, team):
     role.groups_permission.first().permissions.add(
         Permission.objects.get_or_create(slug='entity.team.item.report.all')[0]
     )
+    assert client.get(f'{URL_TEAM}{team.id}/report/').status_code == 200
+
+    # an alternative without `__selector__` matches him (permit.W008 reports it)
+    Role.objects.filter(for_anonymous=True).delete()
+    role = role_with(
+        'team_alternative',
+        'entity.team.item.view.all',
+        'entity.team.item.report.members=__selector__|name=Core',
+    )
+    role.for_anonymous = True
+    role.save()
     assert client.get(f'{URL_TEAM}{team.id}/report/').status_code == 200
 
 

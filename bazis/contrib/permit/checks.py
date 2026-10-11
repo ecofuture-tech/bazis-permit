@@ -156,19 +156,24 @@ def check_actions_access(app_configs, **kwargs):
 
 def _anonymous_match(selector: str, of_item: bool) -> bool:
     """
-    Whether a permission with the selector lets an anonymous user call an action: any
+    Whether a permission with the selector may let an anonymous user call an action: any
     selector for an action of the collection (it needs a permission on the model), for an
-    action of an item one an anonymous user matches, `all` or a condition without
-    `__selector__` (he is nobody's selector).
+    action of an item one an anonymous user may match: `all`, or a condition other than a
+    plain selector (a relation), unless its only branch is `__selector__` (he is nobody's
+    selector: `author=__selector__&is_active=true` matches nothing). A condition with an
+    alternative or a negation (`author=__selector__|is_public=true`,
+    `~author=__selector__`) may match him: it is reported (the check does not evaluate it).
     """
     from .declare import SELECTOR_NAME
     from .schemas import PERM_ALL
 
     if not of_item:
         return True
-    return selector == PERM_ALL or (
-        not SELECTOR_NAME.match(selector) and '__selector__' not in selector
-    )
+    if selector == PERM_ALL:
+        return True
+    if SELECTOR_NAME.match(selector):
+        return False
+    return '__selector__' not in selector or '|' in selector or '~' in selector
 
 
 def anonymous_actions(roles: dict[str, set[str]], source: str) -> list[Warning]:

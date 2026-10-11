@@ -388,3 +388,80 @@ def test_schema_list_keeps_the_combinations_maybe_viewed(sample_app, meetings, v
     result = list_and_cards(client)
     assert all(listed == card for listed, card in result.values())
     assert set().union(*(listed for listed, __ in result.values())) <= first
+
+
+@pytest.mark.django_db(transaction=True)
+def test_schema_list_combinations_of_a_selector(sample_app, meetings):
+    """
+    The view and the field group under the same selector (`participants`): the combination
+    without the group (every field) is left out, as for a condition of values.
+    """
+    role = role_ordered(
+        'participant_subset',
+        [
+            'entity.meeting.item.view.participants',
+            'entity.meeting.field.view.participants.__all__.disable',
+            'entity.meeting.field.view.participants.title.enable',
+        ],
+        False,
+    )
+    user = user_with('participant_subset', role)
+    secret, *__ = meetings
+    secret.participants.add(user)
+    client = get_api_client(sample_app, user.jwt_build())
+
+    members = schema_list_members(client)
+    assert members and all(it == {'title'} for it in members)
+    result = list_and_cards(client)
+    assert list(result.values()) == [({'title'}, {'title'})]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_schema_list_combinations_with_a_group_not_required(sample_app, meetings):
+    """
+    Two conditional groups, the view under the condition of one of them: the combinations
+    without it are left out (2 of 4), those with it, also with the other group, are kept.
+    """
+    role = role_ordered(
+        'one_required',
+        [
+            'entity.meeting.item.view.title=Sync',
+            *PUBLIC_SUBSET,
+            'entity.meeting.field.view.participants.title.disable',
+        ],
+        False,
+    )
+    user = user_with('one_required', role)
+    secret, plain, own, both = meetings
+    both.participants.add(user)
+    client = get_api_client(sample_app, user.jwt_build())
+
+    schemas = routes_abstract.SchemasPermit(MeetingRouteSet, user, Meeting, None, True)
+    members = schemas[CrudApiAction.LIST].model_fields['data'].annotation.__args__[0].__args__
+    __, conditional = routes_abstract.field_groups_split(schemas.get_helper(CrudApiAction.LIST).permit_handler)
+    assert len(conditional) == 2
+    # the union, the fields shown everywhere, the two combinations with the group of the view
+    assert len(members) == 4
+    result = list_and_cards(client)
+    # `Sync` with the user among its participants: the title of the group of the view wins
+    assert list(result.values()) == [({'title'}, {'title'})]
+    first, *others = schema_list_members(client)
+    # the fields shown everywhere: none, as the other group hides the title alone
+    assert first == {'title'} and all(it <= first for it in others)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_list_object_of_an_unknown_combination(sample_app, meetings, monkeypatch, caplog):
+    """
+    An object whose combination has no member in the schema of the list is shown with the
+    fields shown in every object and logged, not a 500 (bazis 2.16).
+    """
+    role = role_ordered('unknown_key', ['entity.meeting.item.view.title=Sync', *PUBLIC_SUBSET], False)
+    user = user_with('unknown_key', role)
+    monkeypatch.setattr(routes_abstract, 'field_groups_reachable', lambda handler, conditional: [])
+    client = get_api_client(sample_app, user.jwt_build())
+
+    response = client.get(URL_MEETING)
+    assert response.status_code == 200, response.content
+    assert [shown(it) for it in response.json()['data']] == [{'title'}]
+    assert [it for it in caplog.records if 'has no member for the _schema_key' in it.getMessage()]
