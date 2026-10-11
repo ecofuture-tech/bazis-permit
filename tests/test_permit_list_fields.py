@@ -28,11 +28,16 @@ from translated_fields import to_attribute
 
 from bazis.contrib.permit import routes_abstract
 from bazis.contrib.permit.models import GroupPermission, Permission, Role
+from bazis.core.schemas import CrudAccessAction, CrudApiAction
+
+from tests import factories
 
 from .test_permit_selectors import URL_MEETING, user_with
 
 
 VIEW = ('entity.meeting.item.view.all', 'entity.team.item.view.all')
+URL_PARENT = '/api/v1/entity/parent_entity/'
+URL_CHILD = '/api/v1/entity/child_entity/'
 
 
 def role_ordered(name: str, slugs: list[str], reverse: bool) -> Role:
@@ -49,6 +54,11 @@ def role_ordered(name: str, slugs: list[str], reverse: bool) -> Role:
     return role
 
 
+def shown(resource: dict) -> set[str]:
+    """The attributes and the relationships of a resource object."""
+    return set(resource.get('attributes') or ()) | set(resource.get('relationships') or ())
+
+
 def list_and_cards(client) -> dict[str, tuple[set, set]]:
     response = client.get(URL_MEETING)
     assert response.status_code == 200, response.content
@@ -58,7 +68,7 @@ def list_and_cards(client) -> dict[str, tuple[set, set]]:
     for it in data:
         card = client.get(f'{URL_MEETING}{it["id"]}/')
         assert card.status_code == 200, card.content
-        result[it['id']] = (set(it['attributes']), set(card.json()['data']['attributes']))
+        result[it['id']] = (shown(it), shown(card.json()['data']))
     return result
 
 
@@ -139,31 +149,161 @@ def test_an_object_in_two_conditional_groups(sample_app, meetings, reverse):
     assert not {'title', 'description'} & names
 
 
-@pytest.mark.django_db(transaction=True)
-def test_more_conditional_groups_than_the_list_combines(sample_app, meetings, monkeypatch):
-    """
-    Over `FIELD_GROUPS_COMBINED_MAX` conditional groups the list shows every object with the
-    fields shown in all of them (`query_fields`): never a field its card hides.
-    """
-    monkeypatch.setattr(routes_abstract, 'FIELD_GROUPS_COMBINED_MAX', 1)
+#: conditional field groups of the meetings, each hiding another field: the first four are
+#: `FIELD_GROUPS_COMBINED_MAX`
+CONDITIONAL = [
+    'entity.meeting.field.view.author.title.disable',
+    'entity.meeting.field.view.participants.description.disable',
+    'entity.meeting.field.view.title=Sync.team.disable',
+    'entity.meeting.field.view.title=Retro.dt_created.disable',
+    'entity.meeting.field.view.title=Review.dt_updated.disable',
+]
+
+
+def schema_list_members(client) -> list[set[str]]:
+    """The fields (attributes and relationships) of each member of `schema_list`, in order."""
+    schema = client.get(f'{URL_MEETING}schema_list/').json()
+    defs = schema['$defs']
+
+    def resolve(it):
+        return defs[it['$ref'].split('/')[-1]] if '$ref' in it else it
+
+    items = schema['properties']['data']['items']
+    members = []
+    for member in items.get('anyOf', [items]):
+        properties = resolve(member)['properties']
+        members.append(
+            set(resolve(properties['attributes']).get('properties', {}))
+            | set(resolve(properties['relationships']).get('properties', {}))
+        )
+    return members
+
+
+def conditional_meetings(user, *meetings):
+    """secret: a participant; own: the author; both: both; plain: neither."""
     secret, plain, own, both = meetings
+    secret.participants.add(user)
+    both.participants.add(user)
+    Meeting.objects.filter(pk__in=[own.pk, both.pk]).update(author=user)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_schema_list_first_member_is_the_union(sample_app, meetings):
+    """
+    The first member of `schema_list` has every field some object of the list shows (a
+    client takes its columns from it), no object has it; the member of each object is in it
+    and is its card.
+    """
+    role = role_ordered('union', [*VIEW, *CONDITIONAL[:2]], False)
+    user = user_with('union', role)
+    conditional_meetings(user, *meetings)
+    client = get_api_client(sample_app, user.jwt_build())
+
+    first, *others = schema_list_members(client)
+    assert first == set().union(*others)
+    assert {'title', 'description'} <= first
+    result = list_and_cards(client)
+    for listed, card in result.values():
+        assert listed == card and listed <= first and listed in others
+    assert set().union(*(listed for listed, __ in result.values())) == first
+
+    schemas = routes_abstract.SchemasPermit(MeetingRouteSet, user, Meeting, None, True)
+    keys = [it.schema_key for it in schemas[CrudApiAction.LIST].model_fields['data'].annotation.__args__[0].__args__]
+    assert keys[0] == routes_abstract.SCHEMA_KEY_UNION
+    rows = MeetingRouteSet.restrict_queryset(Meeting.objects.all(), CrudAccessAction.VIEW, user=user)
+    assert routes_abstract.SCHEMA_KEY_UNION not in set(rows.values_list('_schema_key', flat=True))
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('reverse', [False, True])
+def test_conditional_groups_at_the_limit(sample_app, meetings, reverse):
+    """
+    `FIELD_GROUPS_COMBINED_MAX` conditional groups: every object of the list has the fields
+    of its card.
+    """
+    assert len(CONDITIONAL[:-1]) == routes_abstract.FIELD_GROUPS_COMBINED_MAX
+    name = f'limit_{int(reverse)}'
+    role = role_ordered(name, [*VIEW, *CONDITIONAL[:-1]], reverse)
+    user = user_with(name, role)
+    conditional_meetings(user, *meetings)
+    secret, plain, own, both = meetings
+    client = get_api_client(sample_app, user.jwt_build())
+
+    result = list_and_cards(client)
+    for listed, card in result.values():
+        assert listed == card
+    assert 'description' not in result[str(secret.id)][0]
+    assert not {'title', 'description', 'team'} & result[str(both.id)][0]
+    assert not {'title', 'dt_created'} & result[str(own.id)][0]
+    assert 'dt_updated' in result[str(plain.id)][0]
+    first, *__ = schema_list_members(client)
+    assert {'title', 'description', 'team', 'dt_created'} <= first
+
+
+@pytest.mark.django_db(transaction=True)
+def test_conditional_groups_over_the_limit(sample_app, meetings):
+    """
+    Over `FIELD_GROUPS_COMBINED_MAX` conditional groups every object of the list has the
+    fields shown in all of them (`query_fields`): never a field its card hides; the first
+    member of `schema_list` is that set.
+    """
+    role = role_ordered('over_limit', [*VIEW, *CONDITIONAL], False)
+    user = user_with('over_limit', role)
+    conditional_meetings(user, *meetings)
+    client = get_api_client(sample_app, user.jwt_build())
+
+    hidden = {'title', 'description', 'team', 'dt_created', 'dt_updated'}
+    result = list_and_cards(client)
+    for listed, card in result.values():
+        assert listed <= card
+        assert not hidden & listed
+    assert {'title', 'description'} <= result[str(meetings[1].id)][1]
+    first, *others = schema_list_members(client)
+    assert not hidden & first and all(it <= first for it in others)
+    assert not hidden & {f.name for f in MeetingRouteSet.query_fields(user=user)}
+
+
+@pytest.mark.django_db(transaction=True)
+def test_included_objects_with_conditional_groups(sample_app):
+    """
+    `include` with conditional field groups: a list of a permit route has no `included` (its
+    schema has no inclusions), the item of another route includes each object with the
+    fields of its card, whatever the groups it matches.
+    """
     role = role_ordered(
-        'over_max',
+        'included',
         [
-            *VIEW,
-            'entity.meeting.field.view.author.title.disable',
-            'entity.meeting.field.view.participants.description.disable',
+            'entity.child_entity.item.view.all',
+            'entity.parent_entity.item.view.all',
+            'entity.parent_entity.field.view.author.description.disable',
+            'entity.parent_entity.field.view.is_active=true.price.disable',
         ],
         False,
     )
-    user = user_with('over_max', role)
-    secret.participants.add(user)
-    result = list_and_cards(get_api_client(sample_app, user.jwt_build()))
+    user = user_with('included', role)
+    child = factories.ChildEntityFactory.create()
+    parents = [
+        factories.ParentEntityFactory.create(
+            author=user if own else None, is_active=active, child_entities=child
+        )
+        for own in (False, True)
+        for active in (False, True)
+    ]
+    client = get_api_client(sample_app, user.jwt_build())
 
-    for listed, card in result.values():
-        assert listed <= card
-        assert not {'title', 'description'} & listed
-    assert {'title', 'description'} <= result[str(plain.id)][1]
+    response = client.get(URL_CHILD, params={'include': 'parent_entities'})
+    assert response.status_code == 200, response.content
+    assert not response.json().get('included')
+
+    response = client.get(f'{URL_CHILD}{child.id}/', params={'include': 'parent_entities'})
+    assert response.status_code == 200, response.content
+    included = {it['id']: shown(it) for it in response.json()['included']}
+    assert set(included) == {str(it.id) for it in parents}
+    for parent in parents:
+        card = shown(client.get(f'{URL_PARENT}{parent.id}/').json()['data'])
+        assert included[str(parent.id)] == card
+        assert ('description' in card) is (parent.author_id != user.pk)
+        assert ('price' in card) is not parent.is_active
 
 
 @pytest.mark.django_db(transaction=True)

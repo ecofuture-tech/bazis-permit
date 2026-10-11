@@ -165,9 +165,12 @@ class DocumentRouteSet(PermitRouteBase):
   field itself replaces the one of `__all__` of the same kind (availability: `enable`,
   `readonly`, `disable`), and of the permissions of the user that match an object,
   `enable` wins over `readonly` and `disable`, and `readonly` over `disable`. An object of
-  a list has the fields of its card (bazis-permit 2.11): up to 6 conditional field groups
-  of a role on a model (`FIELD_GROUPS_COMBINED_MAX`, a schema per combination); with more,
-  the list shows every object with the fields shown in all of them (the card shows more). One field writable, the others read-only (a model with statuses has the
+  a list has the fields of its card (bazis-permit 2.11): up to 4 conditional field groups
+  (other selectors or statuses) of a role on a model (`FIELD_GROUPS_COMBINED_MAX`, a schema
+  per combination, at most 16); with more, the list shows every object with the fields
+  shown in all of them (the card shows more), so keep the conditions of a role few. The
+  first member of `schema_list` (`anyOf[0]` of `data.items`) is the union of the fields
+  some object of the list may show, the columns of a client; no object has it. One field writable, the others read-only (a model with statuses has the
   status segment, `client.all.__all__.readonly`):
 
   ```python

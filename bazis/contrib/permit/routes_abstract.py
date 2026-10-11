@@ -100,7 +100,11 @@ def fields_restricts_collect(perms_field_values):
 #: the most conditional field groups of the user for a model whose combinations a list tells
 #: apart (2 ** N schemas of its objects); with more, every object of the list has the fields
 #: shown in all of them (`fields_shown_everywhere`, as `query_fields`)
-FIELD_GROUPS_COMBINED_MAX = 6
+FIELD_GROUPS_COMBINED_MAX = 4
+
+#: the `_schema_key` of the first member of the schema of a list, the union of the fields of
+#: its other members (the columns a client shows): no object has it
+SCHEMA_KEY_UNION = -1
 
 
 def field_groups_split(handler) -> tuple[list[dict], list[tuple[list[dict], Any]]]:
@@ -350,25 +354,28 @@ class SchemasPermit(UserDict):
         `restrict_queryset`), with the field permissions of the groups without a condition
         and of the groups of the combination, as the card of the object. Over
         `FIELD_GROUPS_COMBINED_MAX` conditional groups, and for an object without
-        `_schema_key`, the fields shown in every object (`fields_shown_everywhere`).
+        `_schema_key`, the fields shown in every object (`fields_shown_everywhere`). The
+        first member is the union of the fields of the others (`SCHEMA_KEY_UNION`, no
+        object has it): a client takes its columns from it.
         """
         helper = self.get_helper(CrudApiAction.LIST)
         factory = helper.schema_factory
         unconditional, conditional = field_groups_split(helper.permit_handler)
 
-        def resource(fields, key=None):
-            return SchemaResourceBuilder(factory, fields=fields).build(
-                _schema_key=key, is_response_schema=self.is_response_schema
-            )
-
-        schema_resources = [resource(fields_shown_everywhere(factory, helper.permit_handler))]
+        variants = {None: fields_shown_everywhere(factory, helper.permit_handler)}
         if len(conditional) <= FIELD_GROUPS_COMBINED_MAX:
             for mask in range(1 << len(conditional)):
                 values = field_groups_combination(unconditional, conditional, mask)
-                schema_resources.append(
-                    resource(factory.fields_patch(fields_restricts_collect(values)), mask)
-                )
+                variants[mask] = factory.fields_patch(fields_restricts_collect(values))
+        names = {f.name for fields in variants.values() for f in fields}
+        variants = {SCHEMA_KEY_UNION: [f for f in factory.fields_list if f.name in names]} | variants
 
+        schema_resources = [
+            SchemaResourceBuilder(factory, fields=fields).build(
+                _schema_key=key, is_response_schema=self.is_response_schema
+            )
+            for key, fields in variants.items()
+        ]
         return helper.build_schema(
             inclusions=[], schema_resource=reduce(lambda it, res: it | res, schema_resources)
         )
