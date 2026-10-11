@@ -522,7 +522,7 @@ class ParentEntity(PermitModelMixin, AuthorMixin, DtMixin, UuidMixin, JsonApiMix
 
 **Selector Auto-generation**:
 
-`autogen_selectors_fields` — list of fields for which selector fields with GIN indexes will be automatically created. If `None` — auto-generation is disabled. Many-to-many and reverse relation selectors do not need them (see [Many-to-many and Reverse Relations](#many-to-many-and-reverse-relations)).
+`autogen_selectors_fields` — list of fields for which selector fields with GIN indexes will be automatically created. If `None` — auto-generation is disabled. A selector field `autogen_<field>_selectors` is an array of ids of selector objects (filled by the project or in the admin) that the permissions of the selector also match; it is not in the schemas of the routes (`PermitModelMixin.get_fields_hidden`). Many-to-many and reverse relation selectors do not need them (see [Many-to-many and Reverse Relations](#many-to-many-and-reverse-relations)).
 
 ### Creating Permissions
 

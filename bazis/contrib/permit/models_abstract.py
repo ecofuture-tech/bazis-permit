@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import re
 from collections.abc import Iterable
 from functools import reduce
 
@@ -34,7 +35,7 @@ from bazis.core.utils import triggers
 from bazis.core.utils.orm import apply_calc_queryset
 from bazis.core.utils.query_complex import QueryComplex, QueryComplexItem, QueryToOrm
 
-from .schemas import ATTR_SELECTORS, PermitStructMixin, SelectorField
+from .schemas import ATTR_SELECTORS, PATTERN_SELECTORS, PermitStructMixin, SelectorField
 from .triggers import TriggerRoleCurrentInRoles, TriggerSetDefaultUserRole
 
 
@@ -93,6 +94,17 @@ class PermitModelMixin(UserMixin, PermitStructMixin):
         Class method to retrieve the verbose name of the resource.
         """
         return cls._meta.verbose_name
+
+    @classmethod
+    def get_fields_hidden(cls) -> set[str]:
+        """
+        The generated selector arrays (`autogen_<field>_selectors`) are not in the schemas
+        of the routes: they are filled by the project (or in the admin) and would show the
+        ids of the users and let a writer of the object grant its visibility.
+        """
+        return super().get_fields_hidden() | {
+            f.name for f in cls._meta.fields if re.match(PATTERN_SELECTORS, f.name)
+        }
 
     @classmethod
     def get_selector_fields(cls) -> dict[str, SelectorField]:

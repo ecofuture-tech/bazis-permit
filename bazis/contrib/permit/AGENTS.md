@@ -146,7 +146,11 @@ class DocumentRouteSet(PermitRouteBase):
   rolled back; a statusy transit that hides it is kept and answers 204.
 - Selector array fields (`autogen_<field>_selectors`, GIN) are generated only for the
   forward relations to `PermitSelectorMixin` models listed in `autogen_selectors_fields`;
-  many-to-many and reverse selectors do not need them.
+  many-to-many and reverse selectors do not need them. An array holds ids of selector
+  objects that the permissions of the selector also match (a delegate of the author: the
+  project fills it, or the admin); it is not in the schemas of the routes
+  (`get_fields_hidden`, bazis-permit 2.11 with bazis 2.16), so the `fields` of a route do
+  not exclude it and a client cannot write it.
 - Custom actions (routes of kind `other` of the `http_*` decorators, see below) check the
   permission they declare (`access_action`), else are closed to anonymous users unless
   `public=True`.
