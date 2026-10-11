@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterable
 from functools import reduce
 from typing import Any, Self
 
-from django.db.models import Case, IntegerField, QuerySet, Value, When
+from django.db.models import Case, ExpressionWrapper, IntegerField, QuerySet, Value, When
 from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 
@@ -95,6 +95,61 @@ def fields_restricts_collect(perms_field_values):
             for restrict in restricts.keys():
                 fields_restricts[f_name] |= set(restrict.split('|'))
     return fields_restricts
+
+
+#: the most conditional field groups of the user for a model whose combinations a list tells
+#: apart (2 ** N schemas of its objects); with more, every object of the list has the fields
+#: shown in all of them (`fields_shown_everywhere`, as `query_fields`)
+FIELD_GROUPS_COMBINED_MAX = 6
+
+
+def field_groups_split(handler) -> tuple[list[dict], list[tuple[list[dict], Any]]]:
+    """
+    The field groups of a permission handler (`perms_field_groups`): the values of those
+    without a condition (every object matches them) and the conditional groups in a stable
+    order (by the hash of the condition, not by the ids of the permissions), so that the
+    bits of a combination (`field_groups_combination`) are the same in the query of a list
+    (`restrict_queryset`) and in its schema (`build_schema_list`).
+    """
+    unconditional = []
+    conditional = []
+    for values, cond in handler.perms_field_groups:
+        if cond:
+            conditional.append((values, cond))
+        else:
+            unconditional.extend(values)
+    conditional.sort(key=lambda it: hash(it[1]))
+    return unconditional, conditional
+
+
+def field_groups_combination(unconditional, conditional, mask: int) -> list[dict]:
+    """
+    The field permissions of an object that matches the conditional groups of the bits of
+    `mask` (and no other): those without a condition and those of these groups.
+    """
+    values = list(unconditional)
+    for bit, (group_values, __) in enumerate(conditional):
+        if mask & (1 << bit):
+            values.extend(group_values)
+    return values
+
+
+def fields_shown_everywhere(factory, handler) -> list['SchemaField']:
+    """
+    The fields of the schema factory that the field permissions of the handler show in every
+    object: shown by the groups without a condition alone and with each conditional one. A
+    restriction that shows a field wins over one that hides it, so a combination of
+    conditional groups hides a field only if one of them does.
+    """
+    unconditional, conditional = field_groups_split(handler)
+
+    def shown(values: list[dict]) -> set[str]:
+        return {f.name for f in factory.fields_patch(fields_restricts_collect(values))}
+
+    names = shown(unconditional)
+    for values, __ in conditional:
+        names &= shown([*unconditional, *values])
+    return [f for f in factory.fields_list if f.name in names]
 
 
 class _SchemasPermitHelper:
@@ -290,32 +345,33 @@ class SchemasPermit(UserDict):
 
     def build_schema_list(self):
         """
-        For the list, performs a separate assembly of the combined schema.
-                Collects variations of field sets based on permissions.
-                :return: The assembled schema for the list action.
+        The schema of a list: a resource schema for each combination of the conditional
+        field groups an object may match (`_schema_key`, the bits of the combination set by
+        `restrict_queryset`), with the field permissions of the groups without a condition
+        and of the groups of the combination, as the card of the object. Over
+        `FIELD_GROUPS_COMBINED_MAX` conditional groups, and for an object without
+        `_schema_key`, the fields shown in every object (`fields_shown_everywhere`).
         """
         helper = self.get_helper(CrudApiAction.LIST)
-        schema_resources = [
-            SchemaResourceBuilder(helper.schema_factory).build(is_response_schema=self.is_response_schema)]
+        factory = helper.schema_factory
+        unconditional, conditional = field_groups_split(helper.permit_handler)
 
-        # get unique permission groups
-        for values, cond in helper.permit_handler.perms_field_groups:
-            restricts_collect = fields_restricts_collect(values)
-            fields = helper.schema_factory.fields_patch(restricts_collect)
-
-            # add a new resource schema to the set
-            schema_resources.append(
-                SchemaResourceBuilder(helper.schema_factory, fields=fields).build(
-                    _schema_key=hash(cond), is_response_schema=self.is_response_schema
-                )
+        def resource(fields, key=None):
+            return SchemaResourceBuilder(factory, fields=fields).build(
+                _schema_key=key, is_response_schema=self.is_response_schema
             )
 
-        if schema_resources:
-            schema_resource_union = reduce(lambda it, res: it | res, schema_resources)
-        else:
-            schema_resource_union = None
+        schema_resources = [resource(fields_shown_everywhere(factory, helper.permit_handler))]
+        if len(conditional) <= FIELD_GROUPS_COMBINED_MAX:
+            for mask in range(1 << len(conditional)):
+                values = field_groups_combination(unconditional, conditional, mask)
+                schema_resources.append(
+                    resource(factory.fields_patch(fields_restricts_collect(values)), mask)
+                )
 
-        return helper.build_schema(inclusions=[], schema_resource=schema_resource_union)
+        return helper.build_schema(
+            inclusions=[], schema_resource=reduce(lambda it, res: it | res, schema_resources)
+        )
 
     def build_schema_retrieve(self):
         """
@@ -628,19 +684,7 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         factory = cls.schema_factories.get(CrudApiAction.LIST) or cls.build_schema_factory(
             CrudApiAction.LIST
         )
-        unconditional = []
-        conditional = []
-        for values, cond in handler.perms_field_groups:
-            (conditional if cond else unconditional).append(values)
-
-        def shown(*groups: list[dict]) -> set[str]:
-            values = [value for group in groups for value in group]
-            return {f.name for f in factory.fields_patch(fields_restricts_collect(values))}
-
-        names = shown(*unconditional)
-        for values in conditional:
-            names &= shown(*unconditional, values)
-        return [f for f in factory.fields_list if f.name in names]
+        return fields_shown_everywhere(factory, handler)
 
     @class_or_instance_method
     def restrict_queryset(
@@ -674,23 +718,20 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         if access_action == CrudAccessAction.ADD:
             return qs
 
-        # here we select by IDs of objects that are affected by field permissions
-        # after obtaining such selections, we annotate the objects inside qs with hashes of specific schemas
-
-        cases = []
-        for __, cond in permit_handler.perms_field_groups:
-            q_orm = QueryToOrm(cond, qs.model)
-            if q_orm.fields_calc:
-                qs = apply_calc_queryset(qs, q_orm.fields_calc)
-
-            cases.append(When(q_orm.q or Value(True), then=Value(hash(cond))))
-
+        # the schema of each object in a list: the combination of the conditional field
+        # groups it matches, one bit per group (`build_schema_list`); None over the limit
+        __, conditional = field_groups_split(permit_handler)
+        schema_key = Value(None if len(conditional) > FIELD_GROUPS_COMBINED_MAX else 0)
+        if len(conditional) <= FIELD_GROUPS_COMBINED_MAX:
+            for bit, (__, cond) in enumerate(conditional):
+                q_orm = QueryToOrm(cond, qs.model)
+                if q_orm.fields_calc:
+                    qs = apply_calc_queryset(qs, q_orm.fields_calc)
+                schema_key = schema_key + Case(
+                    When(q_orm.q or Value(True), then=Value(1 << bit)), default=Value(0)
+                )
         qs = qs.annotate(
-            _schema_key=Case(
-                *cases,
-                default=Value(None),
-                output_field=IntegerField(null=True)
-            )
+            _schema_key=ExpressionWrapper(schema_key, output_field=IntegerField(null=True))
         )
 
         qs = permit_handler.struct.perms_item_apply(qs, permit_handler.perms_item)
