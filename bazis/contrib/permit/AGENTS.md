@@ -335,12 +335,25 @@ class CertificateRouteSet(PermitRouteBase):
 - Override `restrict_queryset(qs, access_action, user=None, permit=None, **kwargs)` with
   `**kwargs`: the core calls it on the class.
 - With Bazis 2.9 the `filter`, `sort` and `search` of a request reach only the fields the
-  field permissions show the user: `PermitRouteBase.query_fields(user=None, **kwargs)` is
-  the union of the fields of the field groups the objects match (all the fields if an
-  object can match none: it has no field permissions). A field hidden in every object is
-  400 `ERR_FILTER`; a field shown in only some objects stays filterable, sortable and
-  searchable in all of them, so hide it in the route `fields` if its values must not be
-  found by trial. The internal conditions of the
+  field permissions show the user in every object: `PermitRouteBase.query_fields(user=None,
+  **kwargs)` (bazis-permit 2.11; before, any field shown in some object, and every field
+  when an object could match no field permission). A field hidden in some objects, also
+  only in those of a status or a selector the user cannot view, is 400 `ERR_FILTER` (also
+  through a relation, `meetings__description`) and left out of the search, so its values
+  cannot be found by trial; the conditions are not compared with those of `item.view`.
+  A public subset of the fields (a role for anonymous users that views the open objects)
+  restricts the fields under the condition of the view; the fields it enables are shown
+  and filterable, the others neither:
+
+  ```python
+  'jobs.vacancy.item.view.all.open',
+  'jobs.vacancy.field.view.all.open.__all__.disable',
+  'jobs.vacancy.field.view.all.open.title.enable',   # title: shown and filterable
+  ```
+
+  A field shown in every object the user views but hidden in a status he cannot view
+  (`field.view.all.archived.salary.disable` with `item.view.all.open`) is not filterable
+  either: limit such a rule to the roles that view that status. The internal conditions of the
   permissions (`QueryToOrm` of selectors, `filter:` restrictions) are not restricted.
 - Permissions are cached per user for `BAZIS_PERMISSION_CACHE_EXPIRE` seconds and
   invalidated when roles, groups or permissions change through the ORM (`save`, `delete`,

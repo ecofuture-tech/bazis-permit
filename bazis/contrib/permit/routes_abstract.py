@@ -610,13 +610,17 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
     def query_fields(cls, user=None, **kwargs) -> list[SchemaField]:
         """
         The fields of the LIST schema of the route the field permissions of the user show in
-        some object (Bazis 2.9: the filter, the sorting and the search of a request start
-        with them, also through a relation into the objects of the model): the union of the
-        fields of the field groups that the objects match (`perms_field_groups`, in the
-        order of `restrict_queryset`), all the fields if an object can match none of them
-        (its schema has no field permissions), none if the user cannot have the roles of
-        bazis-permit. A field visible in only some objects of the list stays reachable for
-        all of them. Which objects are reached is decided by `restrict_queryset`.
+        every object (the filter, the sorting and the search of a request start with them,
+        also through a relation into the objects of the model; a field shown in only some
+        objects would tell its values in the others by trial), none if the user cannot have
+        the roles of bazis-permit. An object has the field permissions of every field group
+        it matches (`perms_field_groups`): those without a condition and any of the others,
+        so a field must be shown by those without a condition alone and with each of the
+        others. A restriction that shows a field wins over one that hides it, so a
+        combination of conditional groups hides a field only if one of them does. The
+        conditions are not compared with those of `item.view`: a field hidden only in the
+        objects the user cannot see is not reachable either. Which objects are reached is
+        decided by `restrict_queryset`.
         """
         if (permit := cls._permit_service_on_class(user)) is None:
             return []
@@ -624,13 +628,19 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         factory = cls.schema_factories.get(CrudApiAction.LIST) or cls.build_schema_factory(
             CrudApiAction.LIST
         )
-        names = set()
+        unconditional = []
+        conditional = []
         for values, cond in handler.perms_field_groups:
-            names.update(f.name for f in factory.fields_patch(fields_restricts_collect(values)))
-            if not cond:
-                # every object matches this group or one before it
-                return [f for f in factory.fields_list if f.name in names]
-        return factory.fields_list
+            (conditional if cond else unconditional).append(values)
+
+        def shown(*groups: list[dict]) -> set[str]:
+            values = [value for group in groups for value in group]
+            return {f.name for f in factory.fields_patch(fields_restricts_collect(values))}
+
+        names = shown(*unconditional)
+        for values in conditional:
+            names &= shown(*unconditional, values)
+        return [f for f in factory.fields_list if f.name in names]
 
     @class_or_instance_method
     def restrict_queryset(
