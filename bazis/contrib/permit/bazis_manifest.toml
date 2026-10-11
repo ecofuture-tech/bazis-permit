@@ -22,12 +22,12 @@ use_when = "every route of a model protected by permissions"
 [[extension_points]]
 name = "PermitRouteBase.route_run"
 import = "bazis.contrib.permit.routes_abstract.PermitRouteBase"
-use_when = "a custom action of a protected model (checked in route_check before it runs): access_action=CrudAccessAction.<X> for the permission the roles must give (on the model, or on the item of item_id taken into self.item), public=True for anyone, public=False for any authenticated user"
+use_when = "a custom action of a protected model: access_action= (the permission), public=True (anyone), public=False (any authenticated user) (Custom actions)"
 
 [[extension_points]]
 name = "PermitRouteBase.custom_actions"
 import = "bazis.contrib.permit.routes_abstract.PermitRouteBase"
-use_when = "show a client which custom actions the user may call: ?meta=custom_actions lists their names (x-bazis action), of an item on an item, of the collection on a list, by the rule route_check enforces (action_allowed); an operation of its own is an AccessAction subclass (REPORT = 'report': the permission <app>.<model>.item.report.<selector>)"
+use_when = "show a client which custom actions the user may call: ?meta=custom_actions; an operation of its own is an AccessAction subclass"
 
 [[extension_points]]
 name = "PermitModelMixin"
@@ -60,74 +60,75 @@ import = "bazis.contrib.permit.models_abstract.PermitSelectorMixin"
 use_when = "a model that is a selector source: the user model (for `author`), an organization"
 
 [[pitfalls]]
-text = "BAZIS_PERMIT_RELATIONS_VIEW_CHECK is deprecated and has no effect: the core checks the related objects (relation_targets_check)"
+text = "BAZIS_PERMIT_RELATIONS_VIEW_CHECK is deprecated and has no effect"
 check = "permit.W001"
 
 [[pitfalls]]
-text = "a JSON:API route that neither inherits PermitRouteBase nor overrides restrict_queryset (applied in its get_queryset) serves its whole model; permit_public = True only for public data"
+text = "a JSON:API route that neither inherits PermitRouteBase nor overrides restrict_queryset serves its whole model; permit_public = True only for public data"
 check = "permit.W002"
 
 [[pitfalls]]
-text = "the model of a PermitRouteBase route must be a PermitModelMixin (PermitStructMixin): otherwise its route, `included` and the filters through a relation into it fail with AttributeError once the user has a permission on it"
+text = "the model of a PermitRouteBase route must be a PermitModelMixin"
 check = "permit.W003"
 
 [[pitfalls]]
-text = "the filter, sort and search of a request reach only the fields the field permissions show the user in every object (Bazis 2.9, bazis-permit 2.11, PermitRouteBase.query_fields): a field hidden in some objects, also only in a status or selector the user cannot view, is 400 ERR_FILTER and left out of the search; a public subset of fields: restrict the fields under the same condition as item.view; only with BAZIS_FILTERS_STRICT on (the default), BS_BAZIS_FILTERS_STRICT=false makes every hidden field filterable"
+text = "filter, sort and search reach only the fields the field permissions show the user in every object (400 ERR_FILTER otherwise)"
 
 [[pitfalls]]
-text = "the routes of an item answer 404 for an item the user cannot view (as for a missing one) and 403 for one he views but cannot change or delete; the lookup of the item (get_queryset_for_item: set_item, get_item) is restricted by restrict_queryset for view in the same query, so a custom action that takes its item with them answers the same; the read of the response after a write is not restricted (a create or an update that makes the item invisible is 403 and rolled back; a statusy transit that hides it answers 204)"
+text = "the routes of an item answer 404 for an item the user cannot view and 403 for one he views but cannot change or delete"
 
 [[pitfalls]]
-text = "a custom action (kind other) of a PermitRouteBase: public=True is open to anyone (limited by BAZIS_THROTTLE_PUBLIC per user or IP address); with access_action= the roles decide, also those for anonymous users (on the model for an action of the collection, on the item of item_id, taken into self.item before the action runs, locked for POST, PUT, PATCH and DELETE); with neither only authenticated users (403 for anonymous ones)"
-
-[[pitfalls]]
-text = "a custom action of a PermitRouteBase (of the collection or of an item) without access_action or public is open to every authenticated user: declare access_action (e.g. CrudAccessAction.VIEW, restrict_queryset in its code), or public=False if that is intended"
+text = "a custom action without access_action or public is open to every authenticated user"
 check = "permit.W007"
 
 [[pitfalls]]
-text = "a custom action with access_action=CrudAccessAction.VIEW is open to every role that views the model, the roles for anonymous users and the narrowest roles among them: an aggregate or a report (a count, a funnel, an export) needs an operation of its own (an AccessAction subclass, REPORT = 'report') granted only to the roles that may see it, and counts only the objects the user views (restrict_queryset of the default route of their model); an action anonymous users may call is public=True"
+text = "an aggregate or a report with access_action=CrudAccessAction.VIEW is open to every role that views the model, anonymous ones too: give it an AccessAction of its own"
 check = "permit.W008"
+
+[[pitfalls]]
+text = "`disable` on add or change hides only an optional field: a required one stays in the create and update schemas; fill it on the server or use readonly"
+check = "permit.W009"
 
 [[pitfalls]]
 text = "QuerySet.update() and bulk_create() on roles, groups and permissions do not invalidate the permission cache"
 
 [[pitfalls]]
-text = "a selector names a relation of the model (a foreign key, a many-to-many field or the related_name of a reverse relation) to a PermitSelectorMixin model; any other name matches nothing and is only logged"
+text = "a selector names a relation to a PermitSelectorMixin model; any other name matches nothing and is only logged"
 
 [[pitfalls]]
-text = "a many-to-many selector with a custom through model needs a unique constraint or index on the two foreign keys of the through model"
+text = "a many-to-many selector with a custom through model needs a unique constraint on its two foreign keys"
 
 [[pitfalls]]
-text = "permit_public = True only silences permit.W002: a route that is not a PermitRouteBase serves its get_queryset without permissions whatever it says, and a PermitRouteBase with it still checks them; a route that restricts its objects with its own restrict_queryset (the files of bazis-uploadable, the tasks of bazis-bg) needs no permit_public"
+text = "permit_public = True only silences permit.W002, it checks nothing"
 
 [[pitfalls]]
-text = "the routes of bazis-users do not check permissions: to restrict the users, the user model inherits PermitModelMixin and the project registers its own PermitRouteBase route set of it (default_route = True)"
+text = "the routes of bazis-users do not check permissions: register a PermitRouteBase route set of the user model to restrict them"
 check = "permit.W002"
 
 [[pitfalls]]
-text = "the names of Role and GroupPermission are the columns name_en and name_ru whatever the languages of the project: declare the roles in roles.py with English gettext_lazy names, migrate writes the translations of the catalogs of the project into both (`manage.py bazis_messages status` lists the untranslated ones)"
+text = "the names of Role and GroupPermission are the columns name_en and name_ru: declare English gettext_lazy names in roles.py"
 
 [[pitfalls]]
-text = "a declaration of roles.py with an invalid slug, a duplicate or a group of a role that is not declared stops migrate"
+text = "an invalid slug, a duplicate or an undeclared group of a role in roles.py stops migrate"
 check = "permit.E004"
 
 [[pitfalls]]
-text = "a declared permission names a PermitModelMixin model, a selector that is a relation to a PermitSelectorMixin model and an existing field; a model with statuses has the status segment after the selector"
+text = "a declared permission names a PermitModelMixin model, a selector relation and an existing field (a model with statuses: the status segment after the selector)"
 check = "permit.E005"
 
 [[pitfalls]]
-text = "the declared roles reach the database only by migrate (or flush): after a change of roles.py run migrate; `manage.py bazis_doctor` (bazis 2.13; `manage.py check --database default` with an older core) lists the differences"
+text = "the declared roles reach the database only by migrate"
 check = "permit.W005"
 
 [[pitfalls]]
-text = "a managed role or group removed from roles.py is kept, with its permissions: it is an ordinary object in the admin again, delete it there"
+text = "a managed role or group removed from roles.py is kept: delete it in the admin"
 check = "permit.W006"
 
 [[pitfalls]]
-text = "to show more objects add a permission with another selector, not a union in restrict_queryset (its queryset also carries the field groups of the objects); an override narrows super().restrict_queryset(...)"
+text = "to show more objects add a permission with another selector, not a union in restrict_queryset"
 
 [[pitfalls]]
-text = "a slug of roles.py that exists unmarked is taken over and synced: its permissions (a group) or managed groups (a role) that are not declared are revoked; a managed group the admin attaches to a declared role is removed by migrate"
+text = "a slug of roles.py that exists unmarked is taken over and synced"
 
 [[pitfalls]]
-text = "the declarations are applied after the last migration: on a fresh database a data migration cannot rely on the declared roles"
+text = "on a fresh database a data migration cannot rely on the declared roles: they are applied after the last migration"

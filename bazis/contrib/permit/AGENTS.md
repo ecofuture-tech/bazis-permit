@@ -4,6 +4,21 @@ Permissions for Bazis routes: which objects a user sees and changes, which field
 and writes, which objects a relation may reference. Needs bazis-users. Use it for any API
 where users must not see or change everything.
 
+### The sections
+
+Read a section with `package_guide("bazis-permit", "<section>")` when the step at hand
+needs it; `guide_search` finds the part of a section that answers a question. A product
+with roles needs Model of permissions, Roles in the code, Setup and Rules.
+
+| Section | Read it when |
+|---|---|
+| Model of permissions | you write the permissions: the slug `<app>.<model>.<item\|field>.<operation>.<selector>…`, the operations, the selectors (`all`, `self`, `author`, a relation, a path), the roles of a user, the roles for anonymous users |
+| Roles in the code (`roles.py`) | you declare the roles and the permission groups: `Group`, `Role`, what `migrate` applies, the data migrations, the tests, the checks `permit.E004`, `E005`, `W005`, `W006`, `W009` |
+| Setup | you protect a model: the mixins of the user, the anonymous user and the models, `PermitRouteBase`, the 404 and 403 of the items, the selector arrays, the settings, the users, another route of a protected model, `restrict_queryset` |
+| Field permissions | a role must not see or write some fields: `disable`, `readonly`, `enable`, `__all__`, the fields of a list, a required field on a write (`permit.W009`), the fields the filter, sort and search reach |
+| Custom actions | an action that is no CRUD: `access_action`, `public`, an aggregate or a report, the actions a user may call (`?meta=custom_actions`), an operation of its own (`AccessAction`) |
+| Rules | before you write the code, once: what every route, action and override must respect, the cache of the permissions |
+
 ## Model of permissions
 
 User → `roles` (one active: `role_current`) → `Role.groups_permission` →
@@ -45,6 +60,10 @@ entity.parent.field.change.all.children.filter:is_active=true  # relation may re
 
 Roles for anonymous users: `Role(for_anonymous=True)`. Anonymous users never match a
 selector other than `all`.
+
+The user model (`UserPermitMixin`) has `roles`, a many-to-many relation to `Role` (its
+users: `role.users`), and `role_current`, the active one (`role.users_current`): the
+users of a role are `User.objects.filter(roles__slug='manager')`.
 
 The names of `Role` and `GroupPermission` (and of the statuses and transits of
 bazis-statusy) are translated fields with the columns `name_en` and `name_ru`, whatever
@@ -98,8 +117,9 @@ ROLES = [Role('client', _('Client'), [CLIENT])]    # groups: Group objects or sl
 - Checks: `permit.E004` (a slug, a duplicate, a group of a role that is not declared),
   `permit.E005` (a permission: grammar, the model is a `PermitModelMixin`, the selector is
   a relation to a `PermitSelectorMixin` model, the field exists, the restriction is
-  `enable`/`disable`/`readonly`/`filter:`); with a database (`bazis_doctor`
-  from bazis 2.13, against the database it reaches; with an older core only
+  `enable`/`disable`/`readonly`/`filter:`), `permit.W009` (`bazis_doctor`: a `disable` of
+  a field that the schema of the write keeps, see Field permissions); with a database
+  (`bazis_doctor` from bazis 2.13, against the database it reaches; with an older core only
   `manage.py check --database default`) `permit.W005` (the database differs: migrate) and
   `permit.W006` (orphans). These are warnings: `migrate` runs the
   database checks before it applies the declarations.
@@ -156,35 +176,8 @@ class DocumentRouteSet(PermitRouteBase):
   `public=True`.
 - Settings: `BS_BAZIS_PERMISSION_CACHE_EXPIRE` (seconds, 7; dynamic, in the admin) and
   the deprecated `BS_BAZIS_PERMIT_RELATIONS_VIEW_CHECK` (`permit.W001`).
-- Field permissions in the API: `field.view.<selector>.<field>.disable` removes the field
-  from the data of the objects the selector matches; `field.change.<selector>.<field>.readonly`
-  marks it `readOnly: true` in `schema_update` of the item (the attributes schema in
-  `$defs`), an update ignores it (200, the value unchanged) and its relationships
-  endpoints answer 403 `ERR_RELATIONSHIP_READONLY` (bazis 2.8.1; a 500 before).
-  `__all__` in place of the field is every field of the schema; a restriction of the
-  field itself replaces the one of `__all__` of the same kind (availability: `enable`,
-  `readonly`, `disable`), and of the permissions of the user that match an object,
-  `enable` wins over `readonly` and `disable`, and `readonly` over `disable`. An object of
-  a list has the fields of its card (bazis-permit 2.11): up to 4 conditional field groups
-  (other selectors or statuses) of a role on a model (`FIELD_GROUPS_COMBINED_MAX`, a schema
-  per combination, at most 16); with more, the list shows every object with the fields
-  shown in all of them (the card shows more), so keep the conditions of a role few. The
-  first member of `schema_list` (`anyOf[0]` of `data.items`) is the union of the fields
-  some object of the list may show, the columns of a client; no object has it. The members
-  are the combinations an object the user views may match: when the condition of each of
-  his view permissions is that of a conditional field group (`item.view.all.open` with
-  `field.view.all.open.__all__.disable`, a role for anonymous users), a combination without
-  these groups is left out, and the union names only the fields of the open objects. The
-  conditions are compared as written, not by what they imply: with a view permission of
-  another condition (or none) the union may name a field that no object the user views
-  shows (its name, never a value). One field writable, the others read-only (a model with statuses has the
-  status segment, `client.all.__all__.readonly`):
-
-  ```python
-  'service.act.field.change.client.__all__.readonly',
-  'service.act.field.change.client.confirmed.enable',
-  ```
-- A selector source (`client` above, `Act.client = ForeignKey(Client)`): the model
+- A selector source (`client` of `service.act.field.change.client.…`, `Act.client =
+  ForeignKey(Client)`): the model
   inherits `PermitSelectorMixin` and implements the classmethod
   `get_selector_for_user(user)`; a false value (no client) makes the permission match
   nothing:
@@ -223,6 +216,77 @@ class DocumentRouteSet(PermitRouteBase):
   ```
 
   (the queryset of bazis-permit also carries the field groups of its objects).
+
+## Field permissions
+
+Field permissions restrict the fields of the objects a permission of the item matches,
+per operation (`view`, `add`, `change`) and selector:
+
+- **Hide, protect, show.** `field.view.<selector>.<field>.disable` removes the field from
+  the data of the objects the selector matches; `field.change.<selector>.<field>.readonly`
+  marks it `readOnly: true` in `schema_update` of the item (the attributes schema in
+  `$defs`), an update ignores it (200, the value unchanged) and its relationships
+  endpoints answer 403 `ERR_RELATIONSHIP_READONLY` (bazis 2.8.1; a 500 before).
+  `__all__` in place of the field is every field of the schema; a restriction of the
+  field itself replaces the one of `__all__` of the same kind (availability: `enable`,
+  `readonly`, `disable`), and of the permissions of the user that match an object,
+  `enable` wins over `readonly` and `disable`, and `readonly` over `disable`. One field
+  writable, the others read-only (a model with statuses has the status segment,
+  `client.all.__all__.readonly`):
+
+  ```python
+  'service.act.field.change.client.__all__.readonly',
+  'service.act.field.change.client.confirmed.enable',
+  ```
+- **The fields of a list.** An object of a list has the fields of its card (bazis-permit
+  2.11): up to 4 conditional field groups (other selectors or statuses) of a role on a
+  model (`FIELD_GROUPS_COMBINED_MAX`, a schema per combination, at most 16); with more,
+  the list shows every object with the fields shown in all of them (the card shows more),
+  so keep the conditions of a role few. The first member of `schema_list` (`anyOf[0]` of
+  `data.items`) is the union of the fields some object of the list may show, the columns
+  of a client; no object has it. The members are the combinations an object the user
+  views may match: when the condition of each of his view permissions is that of a
+  conditional field group (`item.view.all.open` with
+  `field.view.all.open.__all__.disable`, a role for anonymous users), a combination
+  without these groups is left out, and the union names only the fields of the open
+  objects. The conditions are compared as written, not by what they imply: with a view
+  permission of another condition (or none) the union may name a field that no object
+  the user views shows (its name, never a value).
+- **A required field cannot be hidden from a write.** `disable` hides a field from the
+  schemas of writing only when it is optional: a field required to create an item (a model
+  field without `blank=True`, `null=True` or a default) stays in the create schema of the
+  role, so `field.add.<selector>.<field>.disable` changes nothing and a create without the
+  field is 422 `ERR_VALIDATE` "Field required" at it; a field required in the model also
+  stays in the update schema, and an update still changes it. A field the server fills
+  (the creator, the owner): make the model field optional (`blank=True`, `null=True` or a
+  default), set it in `hook_before_create` of the route (call `super()`), then disable it
+  for the role; a required field a role must not change: `readonly` on `change` (an update
+  ignores it). `bazis_doctor` warns of such a declaration in `roles.py` (`permit.W009`).
+- **The filter, the sorting and the search.** With Bazis 2.9 the `filter`, `sort` and
+  `search` of a request reach only the fields the field permissions show the user in
+  every object: `PermitRouteBase.query_fields(user=None,
+  **kwargs)` (bazis-permit 2.11; before, any field shown in some object, and every field
+  when an object could match no field permission). A field hidden in some objects, also
+  only in those of a status or a selector the user cannot view, is 400 `ERR_FILTER` (also
+  through a relation, `meetings__description`) and left out of the search, so its values
+  cannot be found by trial; the conditions are not compared with those of `item.view`.
+  Only with `BAZIS_FILTERS_STRICT` of the core on (the default): `BS_BAZIS_FILTERS_STRICT=false`
+  (transitional) restricts neither the filter, the sorting nor the search, so every hidden
+  field can be found by trial again.
+  A public subset of the fields (a role for anonymous users that views the open objects)
+  restricts the fields under the condition of the view; the fields it enables are shown
+  and filterable, the others neither:
+
+  ```python
+  'jobs.vacancy.item.view.all.open',
+  'jobs.vacancy.field.view.all.open.__all__.disable',
+  'jobs.vacancy.field.view.all.open.title.enable',   # title: shown and filterable
+  ```
+
+  A field shown in every object the user views but hidden in a status he cannot view
+  (`field.view.all.archived.salary.disable` with `item.view.all.open`) is not filterable
+  either: limit such a rule to the roles that view that status. The internal conditions of the
+  permissions (`QueryToOrm` of selectors, `filter:` restrictions) are not restricted.
 
 ## Custom actions
 
@@ -375,30 +439,8 @@ class CertificateRouteSet(PermitRouteBase):
   will be removed in 3.0; `permit.W001` reports the setting.
 - Override `restrict_queryset(qs, access_action, user=None, permit=None, **kwargs)` with
   `**kwargs`: the core calls it on the class.
-- With Bazis 2.9 the `filter`, `sort` and `search` of a request reach only the fields the
-  field permissions show the user in every object: `PermitRouteBase.query_fields(user=None,
-  **kwargs)` (bazis-permit 2.11; before, any field shown in some object, and every field
-  when an object could match no field permission). A field hidden in some objects, also
-  only in those of a status or a selector the user cannot view, is 400 `ERR_FILTER` (also
-  through a relation, `meetings__description`) and left out of the search, so its values
-  cannot be found by trial; the conditions are not compared with those of `item.view`.
-  Only with `BAZIS_FILTERS_STRICT` of the core on (the default): `BS_BAZIS_FILTERS_STRICT=false`
-  (transitional) restricts neither the filter, the sorting nor the search, so every hidden
-  field can be found by trial again.
-  A public subset of the fields (a role for anonymous users that views the open objects)
-  restricts the fields under the condition of the view; the fields it enables are shown
-  and filterable, the others neither:
-
-  ```python
-  'jobs.vacancy.item.view.all.open',
-  'jobs.vacancy.field.view.all.open.__all__.disable',
-  'jobs.vacancy.field.view.all.open.title.enable',   # title: shown and filterable
-  ```
-
-  A field shown in every object the user views but hidden in a status he cannot view
-  (`field.view.all.archived.salary.disable` with `item.view.all.open`) is not filterable
-  either: limit such a rule to the roles that view that status. The internal conditions of the
-  permissions (`QueryToOrm` of selectors, `filter:` restrictions) are not restricted.
+- A field the field permissions hide from a user in some of the objects he views is not
+  filterable, sortable or searchable for him (see Field permissions).
 - Permissions are cached per user for `BAZIS_PERMISSION_CACHE_EXPIRE` seconds and
   invalidated when roles, groups or permissions change through the ORM (`save`, `delete`,
   m2m); `QuerySet.update()` and `bulk_create()` do not invalidate the cache.

@@ -32,7 +32,12 @@ import pytest
 from bazis_test_utils.utils import get_api_client
 
 from bazis.contrib.permit import declare
-from bazis.contrib.permit.checks import check_declarations, check_declarations_applied
+from bazis.contrib.permit.checks import (
+    check_declarations,
+    check_declarations_applied,
+    check_declarations_fields,
+    required_disabled,
+)
 from bazis.contrib.permit.declare import Group, Role, apply_declarations, declaration_messages
 from bazis.contrib.permit.models import GroupPermission, Permission
 from bazis.contrib.permit.models import Role as RoleModel
@@ -360,6 +365,74 @@ def test_invalid_permissions(slug, problem):
 )
 def test_valid_permissions(slug):
     assert errors(declaration_messages([('app.roles', Group('decl', 'Decl', [slug]))], [])) == []
+
+
+def test_the_field_checks_of_the_sample_pass(sample_app):
+    assert check_declarations_fields(None) == []
+
+
+def disabled_required(sample_app, *slugs: str) -> list[tuple[str, str]]:
+    """The fields permit.W009 reports for a group of the permissions, by their permission."""
+    messages = required_disabled([('app.roles', Group('decl', 'Decl', list(slugs)))])
+    assert {it.id for it in messages} <= {'permit.W009'}
+    return [(it.msg.split()[2], it.msg.split(' the field ')[1].split(':')[0]) for it in messages]
+
+
+def test_disable_of_a_required_field_on_add_is_reported(sample_app):
+    """
+    The title of a meeting is required: the create schema keeps it whatever `disable` says
+    (an optional field such as the description is hidden).
+    """
+    title = 'entity.meeting.field.add.all.title.disable'
+    description = 'entity.meeting.field.add.all.description.disable'
+    assert disabled_required(sample_app, title, description) == [(title, 'title')]
+
+    messages = required_disabled([('app.roles', Group('decl', 'Decl', [title]))])
+    assert 'entity.Meeting.title is required, so the create schema' in messages[0].msg
+    assert 'entity.routes.MeetingRouteSet' in messages[0].msg
+    assert 'hook_before_create' in messages[0].hint
+    assert messages[0].obj == 'app.roles'
+
+
+def test_disable_of_a_required_field_on_change_is_reported(sample_app):
+    """
+    The update schema keeps a required field too, and an update changes it: `readonly` is
+    the restriction that keeps it unchanged.
+    """
+    title = 'entity.meeting.field.change.author.title.disable'
+    assert disabled_required(sample_app, title) == [(title, 'title')]
+    messages = required_disabled([('app.roles', Group('decl', 'Decl', [title]))])
+    assert 'an update still changes it' in messages[0].msg
+    assert '`readonly`' in messages[0].hint
+
+    assert disabled_required(sample_app, 'entity.meeting.field.change.author.title.readonly') == []
+    assert disabled_required(sample_app, 'entity.meeting.field.change.author.description.disable') == []
+
+
+def test_disable_of_all_fields_reports_the_required_ones_not_shown(sample_app):
+    """
+    `__all__.disable` hides the optional fields; a required field is reported unless a
+    permission of the same operation and condition shows it (its own restriction replaces
+    that of `__all__`). Other conditions and the view are not concerned.
+    """
+    every = 'entity.meeting.field.add.all.__all__.disable'
+    assert disabled_required(sample_app, every) == [(every, 'title')]
+    assert disabled_required(sample_app, every, 'entity.meeting.field.add.all.title.enable') == []
+    # a permission of another condition is another user's: it does not show the field
+    assert disabled_required(sample_app, every, 'entity.meeting.field.add.author.title.enable') == [
+        (every, 'title')
+    ]
+    assert disabled_required(sample_app, 'entity.meeting.field.view.all.title.disable') == []
+    # an invalid permission is permit.E005, not this check
+    assert disabled_required(sample_app, 'entity.meeting.field.add.all.nothing.disable') == []
+
+
+def test_the_field_check_reads_the_declarations(sample_app, monkeypatch):
+    slug = 'entity.meeting.field.add.all.title.disable'
+    monkeypatch.setattr(
+        declare, 'declarations', lambda: ([('app.roles', Group('decl', 'Decl', [slug]))], [])
+    )
+    assert codes(check_declarations_fields(None)) == ['permit.W009']
 
 
 def test_invalid_groups_and_roles():
