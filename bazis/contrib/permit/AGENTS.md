@@ -341,6 +341,9 @@ class CertificateRouteSet(PermitRouteBase):
   only in those of a status or a selector the user cannot view, is 400 `ERR_FILTER` (also
   through a relation, `meetings__description`) and left out of the search, so its values
   cannot be found by trial; the conditions are not compared with those of `item.view`.
+  Only with `BAZIS_FILTERS_STRICT` of the core on (the default): `BS_BAZIS_FILTERS_STRICT=false`
+  (transitional) restricts neither the filter, the sorting nor the search, so every hidden
+  field can be found by trial again.
   A public subset of the fields (a role for anonymous users that views the open objects)
   restricts the fields under the condition of the view; the fields it enables are shown
   and filterable, the others neither:

@@ -72,7 +72,7 @@ text = "the model of a PermitRouteBase route must be a PermitModelMixin (PermitS
 check = "permit.W003"
 
 [[pitfalls]]
-text = "the filter, sort and search of a request reach only the fields the field permissions show the user in every object (Bazis 2.9, bazis-permit 2.11, PermitRouteBase.query_fields): a field hidden in some objects, also only in a status or selector the user cannot view, is 400 ERR_FILTER and left out of the search; a public subset of fields: restrict the fields under the same condition as item.view"
+text = "the filter, sort and search of a request reach only the fields the field permissions show the user in every object (Bazis 2.9, bazis-permit 2.11, PermitRouteBase.query_fields): a field hidden in some objects, also only in a status or selector the user cannot view, is 400 ERR_FILTER and left out of the search; a public subset of fields: restrict the fields under the same condition as item.view; only with BAZIS_FILTERS_STRICT on (the default), BS_BAZIS_FILTERS_STRICT=false makes every hidden field filterable"
 
 [[pitfalls]]
 text = "the routes of an item answer 404 for an item the user cannot view (as for a missing one) and 403 for one he views but cannot change or delete; the lookup of the item (get_queryset_for_item: set_item, get_item) is restricted by restrict_queryset for view in the same query, so a custom action that takes its item with them answers the same; the read of the response after a write is not restricted (a create or an update that makes the item invisible is 403 and rolled back; a statusy transit that hides it answers 204)"
