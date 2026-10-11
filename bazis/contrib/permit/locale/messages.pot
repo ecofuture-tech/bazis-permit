@@ -33,6 +33,10 @@ msgstr ""
 msgid "Available actions"
 msgstr ""
 
+#: contrib/permit/routes_abstract.py:755
+msgid "Available custom actions"
+msgstr ""
+
 #: contrib/permit/models_abstract.py:96
 msgid "User roles"
 msgstr ""

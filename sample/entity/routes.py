@@ -18,7 +18,7 @@ from bazis.contrib.author.routes_abstract import AuthorRouteBase
 from bazis.contrib.permit.routes_abstract import PermitRouteBase
 from bazis.core.routes_abstract.initial import http_get, http_post, route_declare
 from bazis.core.routes_abstract.jsonapi import JsonapiRouteBase
-from bazis.core.schemas import CrudAccessAction, SchemaField, SchemaFields
+from bazis.core.schemas import AccessAction, CrudAccessAction, SchemaField, SchemaFields
 from bazis.core.throttle import throttle
 
 
@@ -74,6 +74,15 @@ class ParentEntityRouteSet(PermitRouteBase, AuthorRouteBase):
         ),
     }
 
+
+class TeamAccessAction(AccessAction):
+    """
+    An operation of the permissions of its own: `entity.team.item.report.<selector>`.
+    """
+
+    REPORT = 'report'
+
+
 class TeamRouteSet(PermitRouteBase):
     """
     Defines routing for the Team model, with its meetings (a filter through a relation).
@@ -115,6 +124,10 @@ class TeamRouteSet(PermitRouteBase):
     @http_get('/{item_id}/card/', public=False)
     def action_card(self, item_id: str, **kwargs) -> str:
         return self.set_item(item_id).name
+
+    @http_get('/{item_id}/report/', access_action=TeamAccessAction.REPORT)
+    def action_report(self, item_id: str, **kwargs) -> str:
+        return f'Report of {self.item.name}'
 
 
 class MeetingRouteSet(PermitRouteBase, AuthorRouteBase):

@@ -17,15 +17,17 @@ The custom actions of a permission route are secure by default: `public=True` op
 anyone (limited by `BAZIS_THROTTLE_PUBLIC`); with `access_action` the roles decide (also
 those for anonymous users), on the model for an action of the collection and on the item,
 taken before the action runs, for an action of an item; with neither only authenticated
-users (sample: `TeamRouteSet`, `TeamGuestRouteSet`).
+users (sample: `TeamRouteSet`, `TeamGuestRouteSet`). The meta field `custom_actions` lists
+the actions the user may call by that rule. The counters of the throttles are reset before
+each test by the plugin of bazis-test-utils.
 """
 
-from django.core.cache import cache
 from django.test import override_settings
 
 import pytest
 from bazis_test_utils.utils import get_api_client
 from entity.models import Team
+from entity.routes import TeamRouteSet
 
 from bazis.contrib.permit.models import Role
 from bazis.contrib.permit.routes_abstract import PermitRouteBase, route_is_action
@@ -41,13 +43,6 @@ from tests.test_permit_selectors import URL_TEAM, role_with, user_with
 
 
 URL_TEAM_GUEST = '/api/v1/entity/team_guest/'
-
-
-@pytest.fixture(autouse=True)
-def throttle_counts():
-    cache.delete_pattern('bazis:throttle:*')
-    yield
-    cache.delete_pattern('bazis:throttle:*')
 
 
 @pytest.fixture
@@ -312,3 +307,93 @@ def test_item_of_a_writing_action_is_checked_locked(sample_app, team, monkeypatc
     lookups.clear()
     assert client.get(f'{URL_TEAM}{team.id}/card/').status_code == 200
     assert lookups == [('TeamRouteSet', False)]
+
+
+def custom_actions(client, url) -> list[str]:
+    response = client.get(url, params={'meta': 'custom_actions'})
+    assert response.status_code == 200, response.content
+    return sorted(response.json()['meta']['custom_actions'])
+
+
+#: the actions of the collection of the teams that need the permission view
+COLLECTION_VIEW = ['action_count', 'action_digest', 'action_list_id']
+
+
+@pytest.mark.django_db(transaction=True)
+def test_custom_actions_meta(sample_app, team, monkeypatch):
+    """
+    `custom_actions` of a list: the actions of the collection the user may call (the public
+    one, those whose permission he has on the model); of an item: the actions of an item
+    he may call on it (`card` for any authenticated user, `rename` with `change`, `report`
+    with the operation of its own `report`), by the rule of `route_check`.
+    """
+    viewer = user_with('viewer', role_with('team_view', 'entity.team.item.view.all'))
+    client = get_api_client(sample_app, viewer.jwt_build())
+    assert custom_actions(client, URL_TEAM) == sorted(['action_motto', *COLLECTION_VIEW])
+    assert custom_actions(client, f'{URL_TEAM}{team.id}/') == ['action_card']
+    # the meta field agrees with the check of the actions
+    assert client.get(f'{URL_TEAM}{team.id}/report/').status_code == 403
+    # an action the route did not register is not listed
+    monkeypatch.setattr(TeamRouteSet.routes_ctx['action_motto'], 'route', None)
+    assert custom_actions(client, URL_TEAM) == COLLECTION_VIEW
+    monkeypatch.undo()
+
+    editor = user_with(
+        'editor',
+        role_with('team_edit', 'entity.team.item.view.all', 'entity.team.item.change.all'),
+    )
+    client = get_api_client(sample_app, editor.jwt_build())
+    assert custom_actions(client, f'{URL_TEAM}{team.id}/') == ['action_card', 'action_rename']
+
+    reporter = user_with(
+        'reporter',
+        role_with('team_report', 'entity.team.item.view.all', 'entity.team.item.report.all'),
+    )
+    client = get_api_client(sample_app, reporter.jwt_build())
+    assert custom_actions(client, f'{URL_TEAM}{team.id}/') == ['action_card', 'action_report']
+    response = client.get(f'{URL_TEAM}{team.id}/report/')
+    assert (response.status_code, response.json()) == (200, 'Report of Core')
+    meta = client.get(
+        f'{URL_TEAM}{team.id}/', params={'meta': 'crud_actions,custom_actions'}
+    ).json()['meta']
+    assert (meta['crud_actions'], meta['custom_actions']) == (
+        ['view'], ['action_card', 'action_report']
+    )
+
+    # without the meta requested: none
+    assert 'custom_actions' not in client.get(URL_TEAM).json().get('meta', {})
+
+
+@pytest.mark.django_db(transaction=True)
+def test_custom_actions_meta_by_selector(sample_app, team):
+    """
+    A permission of a custom operation with a selector: `report` is listed on the team of
+    the user (`members`), not on another team he views.
+    """
+    other = Team.objects.create(name='Other')
+    role = role_with('member', 'entity.team.item.view.all', 'entity.team.item.report.members')
+    member = user_with('member', role, team=team)
+    client = get_api_client(sample_app, member.jwt_build())
+    assert custom_actions(client, f'{URL_TEAM}{team.id}/') == ['action_card', 'action_report']
+    assert custom_actions(client, f'{URL_TEAM}{other.id}/') == ['action_card']
+    assert client.get(f'{URL_TEAM}{other.id}/report/').status_code == 403
+    assert client.get(f'{URL_TEAM}{team.id}/report/').status_code == 200
+
+
+@pytest.mark.django_db(transaction=True)
+def test_custom_actions_meta_anonymous(sample_app, team):
+    """
+    An anonymous user with a role for anonymous users that views the teams: the public
+    action and those his role allows; no action closed to anonymous users (`card`), none
+    whose permission he lacks (`rename`, `report`).
+    """
+    role = role_with('team_guest', 'entity.team.item.view.all')
+    role.for_anonymous = True
+    role.save()
+    client = get_api_client(sample_app)
+    assert custom_actions(client, URL_TEAM) == sorted(['action_motto', *COLLECTION_VIEW])
+    assert custom_actions(client, f'{URL_TEAM}{team.id}/') == []
+
+    Role.objects.filter(for_anonymous=True).delete()
+    # without the role he cannot list the teams
+    assert client.get(URL_TEAM, params={'meta': 'custom_actions'}).status_code == 403

@@ -39,7 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    "bazis-test-utils>=2.3.0",
+    "bazis-test-utils>=2.3.0",  # raise to >=2.5.2 at the release: the plugin resets the throttles
     # the sample project uses AuthorMixin
     "bazis-author>=2.3.0",
 ]

@@ -92,5 +92,9 @@ msgstr ""
 msgid "Available actions"
 msgstr ""
 
+#: routes_abstract.py:755
+msgid "Available custom actions"
+msgstr ""
+
 msgid "Managed by the code"
 msgstr ""

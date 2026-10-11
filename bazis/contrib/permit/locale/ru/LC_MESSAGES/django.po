@@ -92,5 +92,9 @@ msgstr "Доступно для создания"
 msgid "Available actions"
 msgstr "Доступные действия"
 
+#: routes_abstract.py:755
+msgid "Available custom actions"
+msgstr "Доступные собственные действия"
+
 msgid "Managed by the code"
 msgstr "Управляется кодом"

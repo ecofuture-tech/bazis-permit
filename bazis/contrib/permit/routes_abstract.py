@@ -521,16 +521,29 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         route_ctx = self.route_ctx
         if not route_is_action(route_ctx) or route_ctx.public:
             return
-        if route_ctx.access_action is None:
-            if self.inject.user.is_anonymous:
-                raise JsonApi403Exception
-        elif route_is_item(route_ctx):
-            item = self.set_item(
+        target = self.model
+        if route_ctx.access_action is not None and route_is_item(route_ctx):
+            target = self.set_item(
                 kwargs['item_id'], with_lock=route_ctx.http_method in WRITE_METHODS
             )
-            self.check_access(route_ctx.access_action, item)
-        else:
-            self.check_access(route_ctx.access_action, self.model)
+        if not self.action_allowed(route_ctx, target):
+            raise JsonApi403Exception
+
+    def action_allowed(
+        self, route_ctx: RouteContext, item_or_model: JsonApiMixin | type[JsonApiMixin]
+    ) -> bool:
+        """
+        Whether the user may call the custom action `route_ctx` on `item_or_model` (the
+        item of an action of an item, the model of an action of the collection) by what it
+        declares: `public=True` anyone, `access_action` the roles, neither an authenticated
+        user. The rule `route_check` enforces and the meta field `custom_actions` reports;
+        a check the action makes in its own code is not part of it.
+        """
+        if route_ctx.public:
+            return True
+        if route_ctx.access_action is None:
+            return not self.inject.user.is_anonymous
+        return self.inject.permit.handler(route_ctx.access_action, item_or_model).check_access()
 
     def get_queryset_for_item(self, item_id: str, with_lock: bool = False):
         """
@@ -738,6 +751,23 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
             else:
                 actions.append(action.value)
         return actions
+
+    @meta_field([CrudApiAction.LIST, CrudApiAction.RETRIEVE], title=_('Available custom actions'))
+    def custom_actions(self) -> list[str]:
+        """
+        The custom actions the user may call (`action_allowed`), by their names (`action` of
+        `x-bazis` in OpenAPI): on an item those of an item (`{item_id}` in the path) on this
+        item, on a list those of the collection. Only the actions the route registered.
+        """
+        item_scope = self.item is not None
+        return [
+            name
+            for name, route_ctx in type(self).routes_ctx.items()
+            if route_ctx.route is not None
+            and route_is_action(route_ctx)
+            and route_is_item(route_ctx) == item_scope
+            and self.action_allowed(route_ctx, self.item if item_scope else self.model)
+        ]
 
     def update(self, item_id: str, *args, **kwargs) -> JsonApiMixin:
         """

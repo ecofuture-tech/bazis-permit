@@ -25,6 +25,11 @@ import = "bazis.contrib.permit.routes_abstract.PermitRouteBase"
 use_when = "a custom action of a protected model (checked in route_check before it runs): access_action=CrudAccessAction.<X> for the permission the roles must give (on the model, or on the item of item_id taken into self.item), public=True for anyone, public=False for any authenticated user"
 
 [[extension_points]]
+name = "PermitRouteBase.custom_actions"
+import = "bazis.contrib.permit.routes_abstract.PermitRouteBase"
+use_when = "show a client which custom actions the user may call: ?meta=custom_actions lists their names (x-bazis action), of an item on an item, of the collection on a list, by the rule route_check enforces (action_allowed); an operation of its own is an AccessAction subclass (REPORT = 'report': the permission <app>.<model>.item.report.<selector>)"
+
+[[extension_points]]
 name = "PermitModelMixin"
 import = "bazis.contrib.permit.models_abstract.PermitModelMixin"
 use_when = "a model protected by permissions (selectors)"

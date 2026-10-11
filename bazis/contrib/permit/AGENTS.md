@@ -132,7 +132,8 @@ class DocumentRouteSet(PermitRouteBase):
   for the roles, groups and permissions API.
 - `PermitRouteBase` filters the querysets, hides fields, builds the schemas per user, checks
   every CRUD action and the relationships endpoints, and adds the meta fields
-  `for_change`, `for_delete`, `for_create`, `crud_actions`.
+  `for_change`, `for_delete`, `for_create`, `crud_actions`, `custom_actions` (requested
+  with `?meta=`, see Custom actions).
 - Anonymous users can only read (create, update and delete are 403; update and delete
   of an item they cannot view 404), within the roles marked `for_anonymous`.
 - An item the user cannot view does not exist for him: the routes of an item (retrieve,
@@ -267,6 +268,44 @@ class CertificateRouteSet(PermitRouteBase):
   overrides (as `kind`); `route_declare(route, public=True)` (core) changes them on an
   inherited route without repeating its decorator. `x-bazis` in OpenAPI shows `public`
   (always) and `access_action` (when declared).
+- **Which actions the user may call** (to show the buttons of a client): the meta field
+  `custom_actions` (bazis-permit 2.11), requested with `?meta=custom_actions` (with
+  others: `?meta=crud_actions,custom_actions`), lists the names of the actions (`action`
+  of `x-bazis` in OpenAPI, e.g. `action_revoke`) the user may call by the rule above
+  (`PermitRouteBase.action_allowed`, the one `route_check` enforces): on an item (retrieve,
+  and the response of a create, an update or a transit) the actions of an item on this
+  item, on a list the actions of the collection; only the routes the route set registers
+  (`actions`/`actions_exclude`). A check the action makes in its own code (the transits
+  of bazis-statusy: `state_actions`) is not part of it. Do not write a meta field of your
+  own for it.
+
+  ```
+  GET /api/v1/training/certificate/<id>/?meta=crud_actions,custom_actions
+  "meta": {"crud_actions": ["view", "change"], "custom_actions": ["action_card", "action_revoke"]}
+  GET /api/v1/training/certificate/?meta=custom_actions
+  "meta": {"custom_actions": ["action_export", "action_list_id", "action_verify"]}
+  ```
+- **An operation of its own** (a permission no CRUD operation expresses: export the
+  participants, revoke): a subclass of `AccessAction` (core) whose value is the operation
+  of the permission slug. Any operation name is valid in a slug; a model with statuses has
+  the status segment after the selector, as for the CRUD operations:
+
+  ```python
+  # training/access.py
+  from bazis.core.schemas.enums import AccessAction
+
+  class CertificateAccessAction(AccessAction):
+      REPORT = 'report'        # training.certificate.item.report.<selector>[.<status>]
+
+  # training/routes.py
+  @http_post('/{item_id}/report/', access_action=CertificateAccessAction.REPORT)
+  def action_report(self, item_id: str, **kwargs): ...
+
+  # training/roles.py: the roles that may call it
+  'training.certificate.item.report.author',
+  ```
+
+  Check it in code with `self.check_access(CertificateAccessAction.REPORT, item)` (403).
 
 ## Rules
 
