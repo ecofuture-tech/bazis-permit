@@ -244,22 +244,6 @@ def anonymous_actions(roles: dict[str, set[str]], source: str) -> list[Warning]:
     return messages
 
 
-def _declared_roles(anonymous_only: bool = False) -> dict[str, set[str]]:
-    """
-    The roles declared in the `roles.py` modules (only those for anonymous users with
-    `anonymous_only`), with the permissions of their groups.
-    """
-    from .declare import Group, Role, declarations
-
-    groups, roles = declarations()
-    permissions = {it.slug: set(it.permissions) for _module, it in groups if isinstance(it, Group)}
-    return {
-        role.slug: set().union(*(permissions.get(it, set()) for it in role.groups))
-        for _module, role in roles
-        if isinstance(role, Role) and (role.for_anonymous or not anonymous_only)
-    }
-
-
 @register()
 def check_actions_anonymous(app_configs, **kwargs):
     """
@@ -267,7 +251,9 @@ def check_actions_anonymous(app_configs, **kwargs):
     (`Role(for_anonymous=True)`). Runs when the application is loaded (`manage.py
     bazis_doctor`).
     """
-    return anonymous_actions(_declared_roles(anonymous_only=True), 'roles.py')
+    from .declare import declared_role_permissions
+
+    return anonymous_actions(declared_role_permissions(anonymous_only=True), 'roles.py')
 
 
 @register(Tags.database)
@@ -278,23 +264,14 @@ def check_actions_anonymous_applied(app_configs, databases=None, **kwargs):
     declarations do not give, which `check_actions_anonymous` reports. Skipped while
     migrations are not applied.
     """
-    from django.apps import apps
+    from .declare import database_role_permissions, declared_role_permissions
 
-    from bazis.core.declare import migrations_complete
-
-    declared = _declared_roles(anonymous_only=True)
-    roles = {}
-    for using in databases or ():
-        if not migrations_complete(using):
-            continue
-        for role, slug in (
-            apps.get_model('permit.Role')
-            .objects.using(using)
-            .filter(for_anonymous=True, groups_permission__permissions__isnull=False)
-            .values_list('slug', 'groups_permission__permissions__slug')
-        ):
-            if slug not in declared.get(role, ()):
-                roles.setdefault(role, set()).add(slug)
+    declared = declared_role_permissions(anonymous_only=True)
+    roles = {
+        role: rest
+        for role, slugs in database_role_permissions(databases, for_anonymous=True).items()
+        if (rest := slugs - declared.get(role, set()))
+    }
     return anonymous_actions(roles, 'the database')
 
 
@@ -464,27 +441,21 @@ def check_add_field_conditions_applied(app_configs, databases=None, **kwargs):
     built before the object exists. The declared ones are permit.E006 or permit.W011. Skipped while
     migrations are not applied.
     """
-    from django.apps import apps
+    from .declare import (
+        add_field_condition,
+        add_field_condition_problem,
+        database_role_permissions,
+        declared_role_permissions,
+        permission_problem,
+    )
 
-    from bazis.core.declare import migrations_complete
-
-    from .declare import add_field_condition, add_field_condition_problem, permission_problem
-
-    declared = _declared_roles()
+    declared = declared_role_permissions()
     found: dict[str, set[str]] = {}
-    for using in databases or ():
-        if not migrations_complete(using):
-            continue
-        for role, slug in (
-            apps.get_model('permit.Role')
-            .objects.using(using)
-            .filter(groups_permission__permissions__slug__contains='.field.add.')
-            .values_list('slug', 'groups_permission__permissions__slug')
-            .distinct()
-        ):
-            if slug in declared.get(role, ()) or permission_problem(slug):
-                continue
-            if add_field_condition(slug):
+    for role, slugs in database_role_permissions(
+        databases, groups_permission__permissions__slug__contains='.field.add.'
+    ).items():
+        for slug in slugs - declared.get(role, set()):
+            if not permission_problem(slug) and add_field_condition(slug):
                 found.setdefault(slug, set()).add(role)
 
     messages = []

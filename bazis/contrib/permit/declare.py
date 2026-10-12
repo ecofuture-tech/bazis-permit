@@ -179,6 +179,42 @@ def declared_slugs(model_name: str) -> set[str]:
     return {it.slug for _module, it in (groups if model_name == 'grouppermission' else roles)}
 
 
+def declared_role_permissions(anonymous_only: bool = False) -> dict[str, set[str]]:
+    """
+    The roles declared in the `roles.py` modules (only those for anonymous users with
+    `anonymous_only`), their slug → the permissions of their groups.
+    """
+    groups, roles = declarations()
+    permissions = {it.slug: set(it.permissions) for _module, it in groups if isinstance(it, Group)}
+    return {
+        role.slug: set().union(*(permissions.get(it, set()) for it in role.groups))
+        for _module, role in roles
+        if isinstance(role, Role) and (role.for_anonymous or not anonymous_only)
+    }
+
+
+def database_role_permissions(databases, **filters) -> dict[str, set[str]]:
+    """
+    The roles of the `databases` (made in the admin or the API, or the declared ones with
+    the groups the admin attached), their slug → the permissions of all their groups, of
+    the roles and permissions that match `filters` (lookups of `permit.Role`). A database
+    whose migrations are not applied is skipped.
+    """
+    roles: dict[str, set[str]] = {}
+    for using in databases or ():
+        if not migrations_complete(using):
+            continue
+        for role, slug in (
+            apps.get_model('permit.Role')
+            .objects.using(using)
+            .filter(groups_permission__permissions__isnull=False, **filters)
+            .values_list('slug', 'groups_permission__permissions__slug')
+            .distinct()
+        ):
+            roles.setdefault(role, set()).add(slug)
+    return roles
+
+
 def _model(app_label: str, name: str):
     """
     The model of the permissions `<app_label>.<name>.…` (the resource name of the model).
