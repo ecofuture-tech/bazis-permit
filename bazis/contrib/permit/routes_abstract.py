@@ -905,19 +905,24 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         on the saved row with its to-many relations and the values the server filled
         (`author`), before the after-create effects of the route: an override calls
         `super()` first, so an automatic transit it makes comes after the check. A create
-        whose item matches none is 403 `ERR_FORBIDDEN`, the request rolled back. An included
-        item of another model is checked by the permission service of its default route (a
-        model whose default route is no `PermitRouteBase` has no permissions to check).
+        whose item matches none is 403 `ERR_FORBIDDEN`, the request rolled back. Each item
+        is checked right after its own insert (the main item, then the included ones in the
+        order of the document): a selector that only an item created later in the request
+        would satisfy refuses the create (too strict, never a bypass). An included item of
+        another model is checked by the permission service of its default route, or by the
+        one of this route when that route is no `PermitRouteBase` (this service built its
+        create schema). A permission without a condition allows every item, without a query.
         """
         super().hook_after_create(item)
         model = type(item)
-        if issubclass(model, self.model):
-            permit = self.inject.permit
-        elif is_model_permit(model):
+        if not issubclass(model, self.model) and is_model_permit(model):
             permit = model.get_default_route().permit_service_for(self.inject.user)
         else:
+            permit = self.inject.permit
+        handler = permit.handler(CrudAccessAction.ADD, item)
+        if any(not cond for __, cond in handler.perms_item):
             return
-        if not permit.handler(CrudAccessAction.ADD, item).check_access():
+        if not handler.check_access():
             raise JsonApi403Exception()
 
     def item_update(self, item: JsonApiMixin, data: Any):

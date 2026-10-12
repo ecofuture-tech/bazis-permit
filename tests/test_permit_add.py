@@ -30,6 +30,8 @@ from entity.models import DependentEntity, Meeting, ParentEntity, Team
 from entity.routes import MeetingRouteSet
 
 from bazis.contrib.permit.routes_abstract import PermitRouteBase
+from bazis.contrib.permit.services import PermitHandler
+from bazis.core.schemas import CrudAccessAction
 
 from .test_permit_selectors import URL_MEETING, meeting_patch, role_with, user_with
 
@@ -305,3 +307,120 @@ def test_add_with_several_permissions(sample_app):
     assert response.status_code == 201, response.content
     assert_forbidden(client.post(URL_MEETING, json_data=meeting_create()))
     assert Meeting.objects.count() == 2
+
+
+@pytest.mark.django_db(transaction=True)
+def test_add_checks_each_item_after_its_own_insert(sample_app):
+    """
+    Each created item is checked right after its own insert, the main item before the
+    included ones: a selector of the main item that only an included item would satisfy
+    (`dependent_entities__author`, the dependents the request creates with it) refuses the
+    create (too strict, never a bypass); the same document of a role that may add any
+    parent is created.
+    """
+    role = role_with(
+        'by_dependents',
+        'entity.parent_entity.item.add.dependent_entities__author',
+        'entity.parent_entity.item.view.all',
+        'entity.dependent_entity.item.add.all',
+        'entity.dependent_entity.item.view.all',
+    )
+    user = user_with('by_dependents', role)
+    client = client_of(sample_app, user)
+    parent_id = str(uuid.uuid4())
+    dependent = dependent_create(ParentEntity(id=parent_id))['data']
+    payload = {
+        'data': {
+            'id': parent_id,
+            'type': 'entity.parent_entity',
+            'bs:action': 'add',
+            'attributes': {'name': 'Parent'},
+        },
+        'included': [dependent],
+    }
+    response = client.post(f'{URL_PARENT}?{urlencode({"include": "dependent_entities"})}', json_data=payload)
+    assert_forbidden(response)
+    assert not ParentEntity.objects.exists()
+    assert not DependentEntity.objects.exists()
+
+    anyone = user_with(
+        'anyone',
+        role_with(
+            'anyone',
+            'entity.parent_entity.item.add.all',
+            'entity.parent_entity.item.view.all',
+            'entity.dependent_entity.item.add.all',
+            'entity.dependent_entity.item.view.all',
+        ),
+    )
+    response = client_of(sample_app, anyone).post(
+        f'{URL_PARENT}?{urlencode({"include": "dependent_entities"})}', json_data=payload
+    )
+    assert response.status_code == 201, response.content
+    assert DependentEntity.objects.get().parent_entity_id == uuid.UUID(parent_id)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_add_without_a_condition_is_not_evaluated(sample_app, monkeypatch):
+    """
+    A permission without a condition (`item.add.all`) allows every item: the created item
+    is not evaluated (no query of its conditions); one with a selector is.
+    """
+    checked = []
+    check_access = PermitHandler.check_access
+
+    def recording(self, item_passive=False):
+        if self.action == CrudAccessAction.ADD and self.item is not None:
+            checked.append(self.item)
+        return check_access(self, item_passive=item_passive)
+
+    monkeypatch.setattr(PermitHandler, 'check_access', recording)
+    plain = user_with('plain', role_with('plain', 'entity.meeting.item.add.all', 'entity.meeting.item.view.all'))
+    assert client_of(sample_app, plain).post(URL_MEETING, json_data=meeting_create()).status_code == 201
+    assert checked == []
+
+    author = user_with(
+        'author', role_with('author', 'entity.meeting.item.add.author', 'entity.meeting.item.view.all')
+    )
+    assert client_of(sample_app, author).post(URL_MEETING, json_data=meeting_create()).status_code == 201
+    assert len(checked) == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_add_of_an_included_model_without_a_permission_route(sample_app, monkeypatch):
+    """
+    An included item of a model whose default route is no `PermitRouteBase` is checked by
+    the permission service of the route of the request (which built its create schema).
+    """
+    from bazis.contrib.permit import routes_abstract
+
+    is_model_permit = routes_abstract.is_model_permit
+    monkeypatch.setattr(
+        routes_abstract,
+        'is_model_permit',
+        lambda model: model is not DependentEntity and is_model_permit(model),
+    )
+    role = role_with(
+        'included',
+        'entity.parent_entity.item.add.all',
+        'entity.parent_entity.item.view.all',
+        'entity.dependent_entity.item.add.author_parent',
+        'entity.dependent_entity.item.view.all',
+    )
+    user = user_with('included', role)
+    other = user_with('other', role)
+    foreign = ParentEntity.objects.create(name='Foreign', author=other)
+    payload = {
+        'data': {
+            'id': str(uuid.uuid4()),
+            'type': 'entity.parent_entity',
+            'bs:action': 'add',
+            'attributes': {'name': 'Parent'},
+        },
+        'included': [dependent_create(foreign)['data']],
+    }
+    response = client_of(sample_app, user).post(
+        f'{URL_PARENT}?{urlencode({"include": "dependent_entities"})}', json_data=payload
+    )
+    assert_forbidden(response)
+    assert list(ParentEntity.objects.all()) == [foreign]

@@ -185,9 +185,25 @@ class DocumentRouteSet(PermitRouteBase):
   the after-create effects of the route: an override of `hook_after_create` calls `super()`
   first, so what it changes afterwards (an automatic transit) is the server's, not the
   user's. A selector the new item cannot match (a reverse relation nobody links yet)
-  refuses every create of the role. An update is not checked against `add` (its result:
-  `check`). Code that writes through the ORM (a command, the admin, `transit_apply`) is
-  not checked.
+  refuses every create of the role. Each item is checked right after its own insert, the
+  main item first, then the included ones in the order of the document: a selector of an
+  item that only an item created later in the same request would satisfy (a reverse
+  relation the included items fill) refuses the create, too strict but never a bypass;
+  create such items in two requests. An included item of a model whose default route is
+  no `PermitRouteBase` is checked by the permission service of the route of the request.
+  A permission without a condition (`item.add.all`, `item.add.all.all`) allows every item
+  without a query. An update is not checked against `add` (its result: `check`). Code
+  that writes through the ORM (a command, the admin, `transit_apply`) is not checked.
+- **Effects of a create that a refusal does not undo.** The check runs in
+  `hook_after_create` of `PermitRouteBase`, after `hook_before_create` and the insert, and
+  a refusal rolls back the transaction of the request only: what runs before it and does
+  not live in the database transaction (a task of bazis-bg queued without
+  `transaction.on_commit`, a call of an external service, a mail, a signal handler with
+  such effects) has happened anyway. Put such effects behind `transaction.on_commit`, or in
+  `hook_after_create` after `super()`. A mixin whose `hook_after_create` comes before
+  `PermitRouteBase` in the bases of the route set runs its code after the check only if it
+  calls `super()` first: list the mixins with effects after `PermitRouteBase`, or call
+  `super()` first in them.
 - Selector array fields (`autogen_<field>_selectors`, GIN) are generated only for the
   forward relations to `PermitSelectorMixin` models listed in `autogen_selectors_fields`;
   many-to-many and reverse selectors do not need them. An array holds ids of selector
@@ -467,8 +483,10 @@ class CertificateRouteSet(PermitRouteBase):
   (`AccessAction`), not `CrudAccessAction.VIEW`, which every role that views the model
   has, the roles for anonymous users among them (`permit.W008`).
 - A create is checked against the selector and the status of the `item.add` permissions on
-  the created item (403 and rolled back): an override of `hook_after_create` calls `super()`
-  first; do not check the selector of a create yourself.
+  each created item right after its insert (403 and rolled back): an override of
+  `hook_after_create` calls `super()` first; do not check the selector of a create
+  yourself. Effects of a create outside the database (tasks, external calls, mails) go
+  behind `transaction.on_commit`: a refused create does not undo them (see Setup).
 - The model of a `PermitRouteBase` route is a `PermitModelMixin` (a `PermitStructMixin`):
   with another model the route and the relations into it fail with `AttributeError` as
   soon as the user has a permission on the model (`permit.W003`, a warning).
