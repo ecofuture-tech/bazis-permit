@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
 from collections import defaultdict
 from collections.abc import Iterable
 
@@ -29,7 +28,7 @@ from starlette.status import HTTP_403_FORBIDDEN
 from bazis.contrib.users import get_anonymous_user_model, get_user_model
 from bazis.contrib.users.service import get_user_optional
 from bazis.core.errors import JsonApiHttpException
-from bazis.core.schemas import AccessAction, CrudAccessAction
+from bazis.core.schemas import AccessAction
 from bazis.core.utils.query_complex import QueryComplex
 
 from .schemas import (
@@ -39,8 +38,6 @@ from .schemas import (
 )
 from .utils import selector_to_complex
 
-
-logger = logging.getLogger(__name__)
 
 User = get_user_model()
 AnonymousUser = get_anonymous_user_model()
@@ -153,17 +150,9 @@ class PermitHandler:
         Cached property that returns a list of permission values for a specific field
         context. Without an item (the create schema) only the permissions without a
         condition apply: those of `add` with a selector or a status other than `all` never
-        apply, and are logged (in `roles.py` they are permit.E006).
+        apply (`roles.py`: permit.E006; the database: permit.W010 of `bazis_doctor`).
         """
         perms = list(self._get_perms_values(self.perms_field))
-        if self.item is None and self.action == CrudAccessAction.ADD:
-            if fields := sorted({name for perm, cond in self.perms_field if cond for name in perm}):
-                logger.warning(
-                    'Permit: the field permissions of add of %s with a condition (a selector or '
-                    'a status other than all) do not apply to a create: %s (permit.E006)',
-                    self.struct.get_resource_label(),
-                    ', '.join(fields),
-                )
         return perms
 
     @cached_property

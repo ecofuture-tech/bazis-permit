@@ -376,8 +376,10 @@ ROLES = [Role('client', _('Client'), [CLIENT])]
 - `manage.py bazis_doctor` checks the declarations: the slugs, the groups of the roles,
   the model (a `PermitModelMixin`), the selector and the field of every permission
   (`permit.E004`, `permit.E005`), a field permission of `add` with a selector or a
-  status other than `all`, which never applies (`permit.E006`), and from bazis 2.13 also compares them with the
-  database it reaches (`permit.W005`, `permit.W006`); with an older core
+  status other than `all`, which never applies (`permit.E006`: an error for `disable`,
+  `readonly` and `filter:`, a warning for `enable`), and from bazis 2.13 also compares them with the
+  database it reaches (`permit.W005`, `permit.W006`, and `permit.W010` for such a field
+  permission of add that a role of the database has); with an older core
   `manage.py check --database default` does.
 
 ### Selectors

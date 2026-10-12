@@ -46,7 +46,7 @@ from dataclasses import dataclass
 
 from django.apps import apps
 from django.conf import settings
-from django.core.checks import CheckMessage, Error
+from django.core.checks import CheckMessage, Error, Warning
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DEFAULT_DB_ALIAS, transaction
 from django.db.models import Q
@@ -267,6 +267,36 @@ def add_field_condition(slug: str) -> list[str] | None:
     return None if all(it == PERM_ALL for it in condition) else condition
 
 
+def add_field_condition_problem(slug: str, condition: list[str]) -> tuple[str, str, bool]:
+    """
+    Why the field permission of add `slug` with the `condition` (`add_field_condition`)
+    never applies, the hint, and whether it restricts the field (`disable`, `readonly`,
+    `filter:`): the role writes the field on every create that the permission meant to
+    restrict, so the fix is the condition `all`. A permission that only shows the field
+    (`enable`) leaves the create stricter than declared: remove it, or show the field to
+    every create of the role. The item permissions of add restrict which items a role
+    creates (`item.add.<selector>[.<status>]`, checked on the created item); the field
+    permissions cannot, the create schema is built before the item exists.
+    """
+    parts = slug.split('.')
+    fixed = '.'.join([*parts[:4], *[PERM_ALL] * len(condition), *parts[4 + len(condition):]])
+    restricts = '.'.join(parts[5 + len(condition) :]).split('|')
+    restricting = any(it in ('disable', 'readonly') or it.startswith('filter:') for it in restricts)
+    text = (
+        'a field permission of add applies only without a condition, and this one has '
+        f'{".".join(condition)}; the create schema is built before the object exists (its '
+        'selector and status are not known)'
+    )
+    if restricting:
+        hint = f'Write {fixed}: it restricts the field on every create of the role.'
+    else:
+        hint = (
+            f'Remove it, or write {fixed} only if every create of the role may write the '
+            'field; item.add.<selector>[.<status>] restricts which objects the role creates.'
+        )
+    return text, hint, restricting
+
+
 def _duplicates(declared: list[tuple[str, object]], key: str) -> dict[str, list[str]]:
     modules = {}
     for module, it in declared:
@@ -283,7 +313,10 @@ def _name_problem(it) -> str | None:
 def declaration_messages(groups, roles) -> list[CheckMessage]:  # noqa: C901
     """
     The problems of the declarations (the system checks permit.E004, permit.E005 and
-    permit.E006); `apply_declarations` refuses declarations with errors.
+    permit.E006); `apply_declarations` refuses declarations with errors. permit.E006 is an
+    error for a field permission of add with a condition that restricts its field (the
+    restriction never applies) and a warning for one that only shows it (`enable`: the
+    create stays stricter than declared).
     """
     messages = []
 
@@ -329,15 +362,15 @@ def declaration_messages(groups, roles) -> list[CheckMessage]:  # noqa: C901
                     id='permit.E005',
                 )
             elif condition := add_field_condition(slug):
-                parts = slug.split('.')
-                fixed = '.'.join([*parts[:4], *[PERM_ALL] * len(condition), *parts[4 + len(condition):]])
-                error(
-                    f'The permission {slug} of the group {group.slug} never applies: a field '
-                    'permission of add applies only without a condition, and this one has '
-                    f'{".".join(condition)}; the create schema is built before the object '
-                    'exists (its selector and status are not known).', module,
-                    hint=f'Write {fixed}: it applies to every create of the role.',
-                    id='permit.E006',
+                text, hint, restricting = add_field_condition_problem(slug, condition)
+                messages.append(
+                    (Error if restricting else Warning)(
+                        f'The permission {slug} of the group {group.slug} never applies: '
+                        f'{text}.',
+                        hint=hint,
+                        obj=module,
+                        id='permit.E006',
+                    )
                 )
     return messages
 

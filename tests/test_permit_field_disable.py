@@ -333,8 +333,9 @@ def test_add_field_permission_applies_only_without_a_condition(sample_app, caplo
     """
     The create schema is built before the object exists: `field.add.all.<field>.disable`
     hides the field from a create, `field.add.<selector>.<field>.disable` (an author, also
-    the user who creates) never applies and is logged (permit.E006 in `roles.py`). The
-    condition of a change permission still applies to the item.
+    the user who creates) never applies (permit.E006 in `roles.py`, permit.W010 of
+    `bazis_doctor` in the database; a create logs nothing). The condition of a change
+    permission still applies to the item.
     """
     hidden = client_with(
         sample_app, 'hidden', *MEETING, 'entity.meeting.field.add.all.description.disable'
@@ -360,12 +361,9 @@ def test_add_field_permission_applies_only_without_a_condition(sample_app, caplo
         'entity.meeting.field.add.author.description.disable',
         'entity.meeting.field.change.author.description.readonly',
     )
-    with caplog.at_level('WARNING', logger='bazis.contrib.permit.services'):
+    with caplog.at_level('WARNING', logger='bazis.contrib.permit'):
         assert 'description' in create_fields(conditional, URL_MEETING)
-    assert (
-        'the field permissions of add of entity.meeting with a condition (a selector or a '
-        'status other than all) do not apply to a create: description (permit.E006)'
-    ) in caplog.text
+    assert 'permit.E006' not in caplog.text
     response = conditional.post(
         URL_MEETING,
         json_data={

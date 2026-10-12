@@ -30,9 +30,11 @@ from django.utils.translation import gettext_lazy as _
 
 import pytest
 from bazis_test_utils.utils import get_api_client
+from translated_fields import to_attribute
 
 from bazis.contrib.permit import declare
 from bazis.contrib.permit.checks import (
+    check_add_field_conditions_applied,
     check_declarations,
     check_declarations_applied,
     check_declarations_fields,
@@ -379,27 +381,93 @@ def test_valid_permissions(slug):
             'entity.meeting.field.add.all.__all__.readonly',
         ),
         (
-            'entity.parent_entity.field.add.author=__selector__&is_active=true.description.enable',
-            'entity.parent_entity.field.add.all.description.enable',
-        ),
-        (
             'entity.child_entity.field.add.author_parent.child_name.filter:^[A-Z]+$',
             'entity.child_entity.field.add.all.child_name.filter:^[A-Z]+$',
+        ),
+        (
+            'entity.meeting.field.add.author.description.enable|readonly',
+            'entity.meeting.field.add.all.description.enable|readonly',
         ),
     ],
 )
 def test_add_field_permission_with_a_condition(slug, fixed):
     """
     A field permission of add with a selector other than `all` never applies: the create
-    schema is built before the object exists (permit.E006, which names the slug to write);
+    schema is built before the object exists. One that restricts its field (`disable`,
+    `readonly`, `filter:`) is the error permit.E006, which names the slug to write;
     `apply_declarations` refuses it.
     """
     messages = errors(declaration_messages([('app.roles', Group('decl', 'Decl', [slug]))], []))
     assert codes(messages) == ['permit.E006']
     assert f'The permission {slug} of the group decl never applies' in messages[0].msg
-    assert messages[0].hint == f'Write {fixed}: it applies to every create of the role.'
+    assert messages[0].hint == f'Write {fixed}: it restricts the field on every create of the role.'
     with pytest.raises(ImproperlyConfigured, match='permit.E006'):
         apply_declarations(groups=[Group('decl', 'Decl', [slug])], roles=[], dry_run=True)
+
+
+@pytest.mark.parametrize(
+    ('slug', 'fixed'),
+    [
+        (
+            'entity.parent_entity.field.add.author=__selector__&is_active=true.description.enable',
+            'entity.parent_entity.field.add.all.description.enable',
+        ),
+        (
+            'entity.meeting.field.add.participants.__all__.enable',
+            'entity.meeting.field.add.all.__all__.enable',
+        ),
+    ],
+)
+@pytest.mark.django_db
+def test_add_field_permission_with_a_condition_that_shows(slug, fixed):
+    """
+    A field permission of add with a condition that only shows its field (`enable`) never
+    applies either, but the create is stricter than declared: permit.E006 is a warning, the
+    hint does not tell to show the field to every create, and the declarations are applied.
+    """
+    messages = declaration_messages([('app.roles', Group('decl', 'Decl', [slug]))], [])
+    assert codes(messages) == ['permit.E006']
+    assert errors(messages) == []
+    assert f'The permission {slug} of the group decl never applies' in messages[0].msg
+    assert messages[0].hint == (
+        f'Remove it, or write {fixed} only if every create of the role may write the field; '
+        'item.add.<selector>[.<status>] restricts which objects the role creates.'
+    )
+    assert apply_declarations(groups=[Group('decl', 'Decl', [slug])], roles=[], dry_run=True)
+
+
+def test_add_field_permissions_of_mixed_groups(monkeypatch):
+    """
+    `check_declarations` over groups that mix the field permissions of add with and without
+    a condition and of the other operations: each conditional one of add is reported once,
+    by its kind; the others are not.
+    """
+    restricting = 'entity.meeting.field.add.author.description.disable'
+    showing = 'entity.meeting.field.add.participants.title.enable'
+    groups = [
+        Group('decl_mixed', 'Mixed', [
+            'entity.meeting.item.add.author',
+            'entity.meeting.field.add.all.description.readonly',
+            'entity.meeting.field.change.author.description.disable',
+            restricting,
+            showing,
+        ]),
+        Group('decl_plain', 'Plain', [
+            'entity.meeting.item.add.all',
+            'entity.meeting.field.add.all.__all__.disable',
+            'entity.meeting.field.add.all.title.enable',
+        ]),
+    ]
+    monkeypatch.setattr(
+        declare,
+        'declarations',
+        lambda: ([('app.roles', it) for it in groups], [('app.roles', Role('decl', 'Decl', groups))]),
+    )
+    messages = check_declarations(None)
+    assert sorted((it.id, it.is_serious(), it.msg.split()[2]) for it in messages) == [
+        ('permit.E006', False, showing),
+        ('permit.E006', True, restricting),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -525,6 +593,64 @@ def test_the_database_checks():
     assert 'grouppermission decl_orphan' in messages[1].msg
     # only listed: nothing was written
     assert GUEST not in permissions('declared_guest_meetings')
+
+
+@pytest.mark.django_db
+def test_add_field_conditions_of_the_database(monkeypatch):
+    """
+    permit.W010: the field permissions of add with a condition that the roles of the
+    database have (the admin, the API), with the roles, by the kind of the restriction. Not
+    reported: a permission of no role, the field permissions of add without a condition, of
+    the other operations, the declared ones (permit.E006).
+    """
+    assert check_add_field_conditions_applied(None) == []
+    assert check_add_field_conditions_applied(None, databases=['default']) == []
+
+    restricting = 'entity.meeting.field.add.author.description.disable'
+    showing = 'entity.meeting.field.add.participants.title.enable'
+    group = GroupPermission.objects.create(slug='admin_meetings', **{to_attribute('name'): 'Meetings'})
+    for slug in (
+        restricting,
+        showing,
+        'entity.meeting.item.add.author',
+        'entity.meeting.field.add.all.description.readonly',
+        'entity.meeting.field.change.author.description.disable',
+        'entity.meeting.field.add.nothing.title.disable',
+    ):
+        group.permissions.add(Permission.objects.get_or_create(slug=slug)[0])
+    # a permission of no role
+    Permission.objects.get_or_create(slug='entity.meeting.field.add.author.title.disable')
+    assert check_add_field_conditions_applied(None, databases=['default']) == []
+
+    for slug in ('admin_editor', 'admin_viewer'):
+        RoleModel.objects.create(slug=slug, **{to_attribute('name'): slug}).groups_permission.add(
+            group
+        )
+    messages = check_add_field_conditions_applied(None, databases=['default'])
+    assert codes(messages) == ['permit.W010', 'permit.W010']
+    assert not errors(messages)
+    assert messages[0].msg.startswith(
+        f'The permission {restricting} of the roles admin_editor, admin_viewer (the database) '
+        'never applies'
+    )
+    assert messages[0].hint.startswith('Write entity.meeting.field.add.all.description.disable')
+    assert messages[1].msg.startswith(f'The permission {showing} of the roles admin_editor')
+    assert messages[1].hint.startswith('Remove it, or write entity.meeting.field.add.all.title.enable')
+
+    # a declared permission of the role is permit.E006, not this check
+    monkeypatch.setattr(
+        declare,
+        'declarations',
+        lambda: (
+            [('app.roles', Group('admin_meetings', 'Meetings', [showing]))],
+            [('app.roles', Role('admin_editor', 'Editor', ['admin_meetings']))],
+        ),
+    )
+    messages = check_add_field_conditions_applied(None, databases=['default'])
+    assert [(it.msg.split()[2], it.msg.split()[6]) for it in messages] == [
+        (restricting, 'admin_editor,'),
+        (showing, 'admin_viewer'),
+    ]
 
 
 @pytest.mark.django_db

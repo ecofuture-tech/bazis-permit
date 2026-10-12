@@ -242,19 +242,19 @@ def anonymous_actions(roles: dict[str, set[str]], source: str) -> list[Warning]:
     return messages
 
 
-def _declared_anonymous() -> dict[str, set[str]]:
+def _declared_roles(anonymous_only: bool = False) -> dict[str, set[str]]:
     """
-    The roles for anonymous users declared in the `roles.py` modules, with the permissions
-    of their groups.
+    The roles declared in the `roles.py` modules (only those for anonymous users with
+    `anonymous_only`), with the permissions of their groups.
     """
-    from .declare import declarations
+    from .declare import Group, Role, declarations
 
     groups, roles = declarations()
-    permissions = {it.slug: set(it.permissions) for _module, it in groups}
+    permissions = {it.slug: set(it.permissions) for _module, it in groups if isinstance(it, Group)}
     return {
         role.slug: set().union(*(permissions.get(it, set()) for it in role.groups))
         for _module, role in roles
-        if role.for_anonymous
+        if isinstance(role, Role) and (role.for_anonymous or not anonymous_only)
     }
 
 
@@ -265,7 +265,7 @@ def check_actions_anonymous(app_configs, **kwargs):
     (`Role(for_anonymous=True)`). Runs when the application is loaded (`manage.py
     bazis_doctor`).
     """
-    return anonymous_actions(_declared_anonymous(), 'roles.py')
+    return anonymous_actions(_declared_roles(anonymous_only=True), 'roles.py')
 
 
 @register(Tags.database)
@@ -280,7 +280,7 @@ def check_actions_anonymous_applied(app_configs, databases=None, **kwargs):
 
     from bazis.core.declare import migrations_complete
 
-    declared = _declared_anonymous()
+    declared = _declared_roles(anonymous_only=True)
     roles = {}
     for using in databases or ():
         if not migrations_complete(using):
@@ -451,4 +451,50 @@ def check_declarations_applied(app_configs, databases=None, **kwargs):
                     id='permit.W006',
                 )
             )
+    return messages
+
+
+@register(Tags.database)
+def check_add_field_conditions_applied(app_configs, databases=None, **kwargs):
+    """
+    permit.W010: the field permissions of add with a condition (a selector or a status other
+    than `all`) that the roles of the database have (made in the admin or the API, or the
+    groups the admin attached to a declared role), which never apply: the create schema is
+    built before the object exists. The declared ones are permit.E006. Skipped while
+    migrations are not applied.
+    """
+    from django.apps import apps
+
+    from bazis.core.declare import migrations_complete
+
+    from .declare import add_field_condition, add_field_condition_problem, permission_problem
+
+    declared = _declared_roles()
+    found: dict[str, set[str]] = {}
+    for using in databases or ():
+        if not migrations_complete(using):
+            continue
+        for role, slug in (
+            apps.get_model('permit.Role')
+            .objects.using(using)
+            .filter(groups_permission__permissions__slug__contains='.field.add.')
+            .values_list('slug', 'groups_permission__permissions__slug')
+            .distinct()
+        ):
+            if slug in declared.get(role, ()) or permission_problem(slug):
+                continue
+            if add_field_condition(slug):
+                found.setdefault(slug, set()).add(role)
+
+    messages = []
+    for slug, roles in sorted(found.items()):
+        text, hint, __ = add_field_condition_problem(slug, add_field_condition(slug))
+        messages.append(
+            Warning(
+                f'The permission {slug} of the roles {", ".join(sorted(roles))} (the database) '
+                f'never applies: {text}.',
+                hint=hint,
+                id='permit.W010',
+            )
+        )
     return messages
