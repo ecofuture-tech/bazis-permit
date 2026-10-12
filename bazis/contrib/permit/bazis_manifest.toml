@@ -94,6 +94,9 @@ text = "a field permission of add applies only with the condition all (`field.ad
 check = "permit.E006"
 
 [[pitfalls]]
+text = "a created item (also an included one) must match the selector and the status of an item.add permission of the user (403, rolled back): an override of hook_after_create calls super() first"
+
+[[pitfalls]]
 text = "QuerySet.update() and bulk_create() on roles, groups and permissions do not invalidate the permission cache"
 
 [[pitfalls]]

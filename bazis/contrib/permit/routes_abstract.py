@@ -741,7 +741,8 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         if not permit_handler.perms_item:
             return qs.none()
 
-        # for the "add" action, the mere fact of having permissions is sufficient
+        # "add": the objects that exist are not restricted by it; the selector and the status
+        # of the permissions are checked on the created item (`hook_after_create`)
         if access_action == CrudAccessAction.ADD:
             return qs
 
@@ -806,7 +807,9 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
     @meta_field([CrudApiAction.LIST], title=_('Available for creation'))
     def for_create(self) -> bool:
         """
-        Returns a boolean value indicating the availability of the "Create" action.
+        Whether the user may create an item: he has an `item.add` permission on the model,
+        whatever its selector and status (the created item is checked against them,
+        `hook_after_create`), so a create may still be refused.
         """
         try:
             self.check_access(CrudAccessAction.ADD, self.model)
@@ -893,6 +896,29 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
     def hook_after_relationships_change(self, item, data, related_field_name, action):
         super().hook_after_relationships_change(item, data, related_field_name, action)
         self.check_access(CrudAccessAction.CHECK, item, item_passive=True)
+
+    def hook_after_create(self, item: JsonApiMixin):
+        """
+        The created item, also an included one, must match an `item.add` permission of the
+        user on its model: its selector and, on a model with statuses, its status (the
+        status segment is literal: `item.add.all.draft` creates only in `draft`), evaluated
+        on the saved row with its to-many relations and the values the server filled
+        (`author`), before the after-create effects of the route: an override calls
+        `super()` first, so an automatic transit it makes comes after the check. A create
+        whose item matches none is 403 `ERR_FORBIDDEN`, the request rolled back. An included
+        item of another model is checked by the permission service of its default route (a
+        model whose default route is no `PermitRouteBase` has no permissions to check).
+        """
+        super().hook_after_create(item)
+        model = type(item)
+        if issubclass(model, self.model):
+            permit = self.inject.permit
+        elif is_model_permit(model):
+            permit = model.get_default_route().permit_service_for(self.inject.user)
+        else:
+            return
+        if not permit.handler(CrudAccessAction.ADD, item).check_access():
+            raise JsonApi403Exception()
 
     def item_update(self, item: JsonApiMixin, data: Any):
         """

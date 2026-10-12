@@ -14,7 +14,7 @@ with roles needs Model of permissions, Roles in the code, Setup and Rules.
 |---|---|
 | Model of permissions | you write the permissions: the slug `<app>.<model>.<item\|field>.<operation>.<selector>…`, the operations, the selectors (`all`, `self`, `author`, a relation, a path), the roles of a user, the roles for anonymous users |
 | Roles in the code (`roles.py`) | you declare the roles and the permission groups: `Group`, `Role`, what `migrate` applies, the data migrations, the tests, the checks `permit.E004`, `E005`, `W005`, `W006`, `W009` |
-| Setup | you protect a model: the mixins of the user, the anonymous user and the models, `PermitRouteBase`, the 404 and 403 of the items, the selector arrays, the settings, the users, another route of a protected model, `restrict_queryset` |
+| Setup | you protect a model: the mixins of the user, the anonymous user and the models, `PermitRouteBase`, the 404 and 403 of the items, the check of a created item, the selector arrays, the settings, the users, another route of a protected model, `restrict_queryset` |
 | Field permissions | a role must not see or write some fields: `disable`, `readonly`, `enable`, `__all__`, the fields of a list, a field on a create (`add` only with `all`: `field.add.all.all.<field>`, `permit.E006`; a required one, `permit.W009`), the fields the filter, sort and search reach |
 | Custom actions | an action that is no CRUD: `access_action`, `public`, an aggregate or a report, the actions a user may call (`?meta=custom_actions`), an operation of its own (`AccessAction`) |
 | Rules | before you write the code, once: what every route, action and override must respect, the cache of the permissions |
@@ -38,8 +38,9 @@ entity.parent.field.change.all.children.filter:is_active=true  # relation may re
 ```
 
 - level `item` (objects) or `field` (fields of objects);
-- operations `add`, `view`, `change`, `delete`, `check` (verified on the saved item, after
-  triggers filled its selectors) and custom ones;
+- operations `add` (verified on the created item: its selector and, on a model with
+  statuses, its status; see Setup), `view`, `change`, `delete`, `check` (verified on the
+  saved item, after triggers filled its selectors) and custom ones;
 - selector `all`, `self` (on a model that is itself a `PermitSelectorMixin`: the object
   is the one its `get_selector_for_user(user)` gives, the user himself on a user model,
   `users.user.item.change.self`; a source of several objects, a list or a queryset,
@@ -166,6 +167,22 @@ class DocumentRouteSet(PermitRouteBase):
   an item he views but cannot change or delete is 403. The read of the response after a
   write is not restricted: a create or an update that makes the item invisible is 403 and
   rolled back; a statusy transit that hides it is kept and answers 204.
+- **A created item matches an `item.add` permission** (bazis-permit 2.11): the create
+  schema is built when the user has any `item.add` permission on the model (`for_create`
+  says the same), then the created item, also an included one (by the permissions of its
+  own model), is checked against their selectors and, on a model with statuses, their
+  status: `item.add.author` (the author is set by the server: every create matches),
+  `item.add.participants` (the user must be among the participants the document sets),
+  `item.add.team__members` (the team of the user), `item.add.all.draft` (only in `draft`).
+  An item that matches none is 403 `ERR_FORBIDDEN` and the request is rolled back. The
+  item is checked as created: saved, with its to-many relations and the values the server
+  filled (`hook_before_create`, the triggers), in `PermitRouteBase.hook_after_create`, before
+  the after-create effects of the route: an override of `hook_after_create` calls `super()`
+  first, so what it changes afterwards (an automatic transit) is the server's, not the
+  user's. A selector the new item cannot match (a reverse relation nobody links yet)
+  refuses every create of the role. An update is not checked against `add` (its result:
+  `check`). Code that writes through the ORM (a command, the admin, `transit_apply`) is
+  not checked.
 - Selector array fields (`autogen_<field>_selectors`, GIN) are generated only for the
   forward relations to `PermitSelectorMixin` models listed in `autogen_selectors_fields`;
   many-to-many and reverse selectors do not need them. An array holds ids of selector
@@ -264,9 +281,9 @@ per operation (`view`, `add`, `change`) and selector:
   apply: `roles.py` refuses them (`permit.E006`, the hint names the slug to write), a
   permission of the database is logged at a create (`do not apply to a create`); before
   bazis-permit 2.11 they did nothing without a word. The `view` and `change` permissions
-  keep their selector and status (`field.change.all.draft.price.readonly`). An `item.add`
-  permission is checked by its presence: its selector and status do not restrict a create
-  either.
+  keep their selector and status (`field.change.all.draft.price.readonly`). To restrict
+  which objects a role creates, use the item permissions of add: `item.add.<selector>`
+  (`.<status>`) is checked on the created item (see Setup).
 - **A required field cannot be hidden from a create.** `disable` on `add` hides a field
   from the create schema only when it is optional: a field required to create an item (a
   model field without `blank=True`, `null=True` or a default) stays in the create schema
@@ -444,6 +461,9 @@ class CertificateRouteSet(PermitRouteBase):
   `is_anonymous` in its code. An aggregate or a report has an operation of its own
   (`AccessAction`), not `CrudAccessAction.VIEW`, which every role that views the model
   has, the roles for anonymous users among them (`permit.W008`).
+- A create is checked against the selector and the status of the `item.add` permissions on
+  the created item (403 and rolled back): an override of `hook_after_create` calls `super()`
+  first; do not check the selector of a create yourself.
 - The model of a `PermitRouteBase` route is a `PermitModelMixin` (a `PermitStructMixin`):
   with another model the route and the relations into it fail with `AttributeError` as
   soon as the user has a permission on the model (`permit.W003`, a warning).

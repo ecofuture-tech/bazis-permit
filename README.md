@@ -611,6 +611,11 @@ class ParentEntityRouteSet(PermitRouteBase, AuthorRouteBase):
 #### Automatic Checking
 
 In routes inheriting from `PermitRouteBase`, access checking happens automatically when accessing `self.schemas`.
+A create needs an `item.add` permission on the model to get its schema, and the created item
+(also an included one) must then match the selector and the status of one of them
+(`item.add.author`, `item.add.all.draft`): otherwise the create is 403 and rolled back
+(bazis-permit 2.11). `check_access(CrudAccessAction.ADD, Model)` on a model checks only that
+the user has such a permission.
 
 #### Manual Checking in Custom Actions
 
