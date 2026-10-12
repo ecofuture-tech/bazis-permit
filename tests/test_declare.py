@@ -363,6 +363,11 @@ def test_invalid_permissions(slug, problem):
         'entity.parent_entity.field.change.all.child_entities.filter:child_is_active=true',
         'entity.child_entity.field.add.all.child_name.filter:^[A-Z]+$',
         'entity.team.item.view.self',
+        # every restriction of the fields of the core
+        'entity.parent_entity.field.change.all.description.required',
+        'entity.parent_entity.field.view.all.description.writeonly',
+        'entity.parent_entity.field.add.all.description.optional|nullable|blank',
+        'entity.parent_entity.field.add.all.description.required|notnull|notblank',
     ],
 )
 def test_valid_permissions(slug):
@@ -388,14 +393,18 @@ def test_valid_permissions(slug):
             'entity.meeting.field.add.author.description.enable|readonly',
             'entity.meeting.field.add.all.description.enable|readonly',
         ),
+        (
+            'entity.meeting.field.add.author.description.required|notblank',
+            'entity.meeting.field.add.all.description.required|notblank',
+        ),
     ],
 )
 def test_add_field_permission_with_a_condition(slug, fixed):
     """
     A field permission of add with a selector other than `all` never applies: the create
     schema is built before the object exists. One that restricts its field (`disable`,
-    `readonly`, `filter:`) is the error permit.E006, which names the slug to write;
-    `apply_declarations` refuses it.
+    `readonly`, `required`, `filter:`…) is the error permit.E006, which names the slug to
+    write; `apply_declarations` refuses it.
     """
     messages = errors(declaration_messages([('app.roles', Group('decl', 'Decl', [slug]))], []))
     assert codes(messages) == ['permit.E006']
@@ -416,13 +425,17 @@ def test_add_field_permission_with_a_condition(slug, fixed):
             'entity.meeting.field.add.participants.__all__.enable',
             'entity.meeting.field.add.all.__all__.enable',
         ),
+        (
+            'entity.meeting.field.add.author.description.writeonly|optional|blank',
+            'entity.meeting.field.add.all.description.writeonly|optional|blank',
+        ),
     ],
 )
 @pytest.mark.django_db
 def test_add_field_permission_with_a_condition_that_shows(slug, fixed):
     """
-    A field permission of add with a condition that only shows its field (`enable`) never
-    applies either, but the create is stricter than declared: the warning permit.W011, the
+    A field permission of add with a condition that only relaxes its field (`enable`,
+    `writeonly`, `optional`…) never applies either, but the create is stricter than declared: the warning permit.W011, the
     hint does not tell to show the field to every create, and the declarations are applied.
     """
     messages = declaration_messages([('app.roles', Group('decl', 'Decl', [slug]))], [])

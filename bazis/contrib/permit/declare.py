@@ -65,6 +65,7 @@ from bazis.core.declare import (  # noqa: F401
     managed_orphans,
     migrations_complete,
 )
+from bazis.core.schemas import FieldAvail, FieldBlank, FieldNull, FieldRequired
 from bazis.core.utils.functools import camel_2_snake
 
 from .models_abstract import LANGUAGES, PermitModelMixin, PermitSelectorMixin
@@ -76,8 +77,21 @@ SLUG = re.compile(r'^[a-z0-9_-]+$')
 #: a selector in the simplified format (a relation or a path of relations); any other one
 #: is a query (`author=__selector__&is_active=true`), not checked
 SELECTOR_NAME = re.compile(r'^[a-zA-Z_]+$')
-#: the restrictions of a field permission, besides `filter:<condition>`
-FIELD_RESTRICTS = {'enable', 'disable', 'readonly'}
+#: the restrictions of a field permission (those of the schemas of the core), besides
+#: `filter:<condition>`
+FIELD_RESTRICTS = frozenset(it.name for it in (*FieldAvail, *FieldRequired, *FieldNull, *FieldBlank))
+#: the restrictions that only relax a field: they show it (replacing a `disable`) or lift a
+#: constraint of the model
+FIELD_RELAXING = frozenset(
+    it.name
+    for it in (
+        FieldAvail.enable,
+        FieldAvail.writeonly,
+        FieldRequired.optional,
+        FieldNull.nullable,
+        FieldBlank.blank,
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -180,6 +194,60 @@ def _model(app_label: str, name: str):
     return None
 
 
+@dataclass(frozen=True)
+class PermissionSlug:
+    """
+    A permission slug split into its segments
+    `<app>.<model>.<item|field>.<operation>.<selector>[.<status>][.<transit>|.<field>.<restriction>]`.
+    `status` is the segment of the models with statuses (bazis-statusy; None for the other
+    models, '' when it is missing), `rest` the segments after the condition; a restriction
+    may contain dots (`filter:price__gte=1.5`).
+    """
+
+    slug: str
+    app_label: str
+    model_name: str
+    level: str
+    operation: str
+    selector: str
+    status: str | None
+    rest: tuple[str, ...]
+    model: type | None
+
+    @property
+    def condition(self) -> list[str]:
+        """The selector, and the status of a model with statuses."""
+        return [self.selector] if self.status is None else [self.selector, self.status]
+
+    @property
+    def field(self) -> str | None:
+        """The field of a field permission."""
+        return self.rest[0] if self.level == 'field' and self.rest else None
+
+    @property
+    def restricts(self) -> list[str]:
+        """The restrictions of a field permission (`enable|readonly`)."""
+        if self.level != 'field' or len(self.rest) < 2:
+            return []
+        return '.'.join(self.rest[1:]).split('|')
+
+
+def parse_permission(slug: str) -> PermissionSlug | None:
+    """
+    The segments of a permission slug, or None when it has fewer than five. The model is
+    looked up by its application and resource name: it tells whether the slug has the
+    status segment.
+    """
+    parts = slug.split('.')
+    if len(parts) < 5:
+        return None
+    model = _model(parts[0], parts[1]) if all(parts[:2]) else None
+    if not hasattr(model, 'get_status_field'):
+        return PermissionSlug(slug, *parts[:5], None, tuple(parts[5:]), model)
+    status = parts[5] if len(parts) > 5 else ''
+    return PermissionSlug(slug, *parts[:5], status, tuple(parts[6:]), model)
+
+
 def _selector_problem(model, selector: str) -> str | None:
     if selector == 'all' or not SELECTOR_NAME.match(selector):
         return None
@@ -220,35 +288,37 @@ def permission_problem(slug: str) -> str | None:  # noqa: C901
     `<app>.<model>.<item|field>.<operation>.<selector>[.<status>][.<field>.<restriction>]`,
     or None. The status is the segment of the models with statuses (bazis-statusy).
     """
-    parts = slug.split('.')
-    if len(parts) < 5 or not all(parts[:5]):
+    perm = parse_permission(slug)
+    if perm is None or not all(
+        (perm.app_label, perm.model_name, perm.level, perm.operation, perm.selector)
+    ):
         return 'expected <app>.<model>.<item|field>.<operation>.<selector>…'
-    app_label, model_name, level, operation, selector = parts[:5]
-    if (model := _model(app_label, model_name)) is None:
-        return f'there is no model {app_label}.{model_name}'
+    if (model := perm.model) is None:
+        return f'there is no model {perm.app_label}.{perm.model_name}'
     if not issubclass(model, PermitModelMixin):
         return f'{model._meta.label} is not a PermitModelMixin'
-    if level not in ('item', 'field'):
-        return f'the level {level!r} is neither item nor field'
-    if problem := _selector_problem(model, selector):
+    if perm.level not in ('item', 'field'):
+        return f'the level {perm.level!r} is neither item nor field'
+    if problem := _selector_problem(model, perm.selector):
         return problem
 
-    status = 1 if hasattr(model, 'get_status_field') else 0
-    if level == 'item':
-        if len(parts) < 5 + status or not all(parts[5:]):
+    if perm.level == 'item':
+        if perm.status == '' or not all(perm.rest):
             return 'expected <selector>.<status> for a model with statuses'
-        if status and operation == 'transit' and len(parts) != 7:
+        if perm.status is not None and perm.operation == 'transit' and len(perm.rest) != 1:
             return 'expected item.transit.<selector>.<status>.<transit>'
         return None
 
-    if len(parts) < 7 + status or not all(parts[5:6 + status]):
+    if perm.status == '' or not perm.field or not perm.restricts:
         return 'a field permission ends with [<status>.]<field>.<restriction>'
-    field, restrict = parts[5 + status], '.'.join(parts[6 + status:])
-    if not _has_field(model, field):
-        return f'{model._meta.label} has no field {field}'
-    for it in restrict.split('|'):
+    if not _has_field(model, perm.field):
+        return f'{model._meta.label} has no field {perm.field}'
+    for it in perm.restricts:
         if it not in FIELD_RESTRICTS and not it.startswith('filter:'):
-            return f'the restriction {it!r} is not one of enable, disable, readonly, filter:…'
+            return (
+                f'the restriction {it!r} is not one of {", ".join(sorted(FIELD_RESTRICTS))}, '
+                'filter:…'
+            )
     return None
 
 
@@ -259,32 +329,38 @@ def add_field_condition(slug: str) -> list[str] | None:
     schema is built before the object exists, so the field permissions of `add` apply
     only without a condition: such a permission never applies (permit.E006).
     """
-    parts = slug.split('.')
-    if parts[2:4] != ['field', 'add']:
+    perm = parse_permission(slug)
+    if perm is None or (perm.level, perm.operation) != ('field', 'add'):
         return None
-    status = 1 if hasattr(_model(parts[0], parts[1]), 'get_status_field') else 0
-    condition = parts[4:5 + status]
-    return None if all(it == PERM_ALL for it in condition) else condition
+    return None if all(it == PERM_ALL for it in perm.condition) else perm.condition
 
 
-def add_field_condition_problem(slug: str, condition: list[str]) -> tuple[str, str, bool]:
+def add_field_condition_problem(slug: str) -> tuple[str, str, bool]:
     """
-    Why the field permission of add `slug` with the `condition` (`add_field_condition`)
-    never applies, the hint, and whether it restricts the field (`disable`, `readonly`,
-    `filter:`): the role writes the field on every create that the permission meant to
-    restrict, so the fix is the condition `all`. A permission that only shows the field
-    (`enable`) leaves the create stricter than declared: remove it, or show the field to
-    every create of the role. The item permissions of add restrict which items a role
-    creates (`item.add.<selector>[.<status>]`, checked on the created item); the field
-    permissions cannot, the create schema is built before the item exists.
+    Why the field permission of add `slug` with a condition (`add_field_condition`) never
+    applies, the hint, and whether it restricts the field (any restriction but those that
+    only relax it, `FIELD_RELAXING`): the role writes the field on every create that the
+    permission meant to restrict, so the fix is the condition `all`. A permission that only
+    relaxes the field (`enable`) leaves the create stricter than declared: remove it, or
+    relax the field on every create of the role. The item permissions of add restrict which
+    items a role creates (`item.add.<selector>[.<status>]`, checked on the created item);
+    the field permissions cannot, the create schema is built before the item exists.
     """
-    parts = slug.split('.')
-    fixed = '.'.join([*parts[:4], *[PERM_ALL] * len(condition), *parts[4 + len(condition):]])
-    restricts = '.'.join(parts[5 + len(condition) :]).split('|')
-    restricting = any(it in ('disable', 'readonly') or it.startswith('filter:') for it in restricts)
+    perm = parse_permission(slug)
+    fixed = '.'.join(
+        [
+            perm.app_label,
+            perm.model_name,
+            perm.level,
+            perm.operation,
+            *[PERM_ALL] * len(perm.condition),
+            *perm.rest,
+        ]
+    )
+    restricting = any(it not in FIELD_RELAXING for it in perm.restricts)
     text = (
         'a field permission of add applies only without a condition, and this one has '
-        f'{".".join(condition)}; the create schema is built before the object exists (its '
+        f'{".".join(perm.condition)}; the create schema is built before the object exists (its '
         'selector and status are not known)'
     )
     if restricting:
@@ -316,7 +392,7 @@ def declaration_messages(groups, roles) -> list[CheckMessage]:  # noqa: C901
     permit.E006 and permit.W011); `apply_declarations` refuses declarations with errors. A
     field permission of add with a condition never applies: permit.E006 (an error) for one
     that restricts its field (the restriction is lost), permit.W011 (a warning) for one that
-    only shows it (`enable`: the create stays stricter than declared).
+    only relaxes it (`enable`, `FIELD_RELAXING`: the create stays stricter than declared).
     """
     messages = []
 
@@ -361,8 +437,8 @@ def declaration_messages(groups, roles) -> list[CheckMessage]:  # noqa: C901
                     f'The permission {slug} of the group {group.slug}: {problem}.', module,
                     id='permit.E005',
                 )
-            elif condition := add_field_condition(slug):
-                text, hint, restricting = add_field_condition_problem(slug, condition)
+            elif add_field_condition(slug):
+                text, hint, restricting = add_field_condition_problem(slug)
                 text = f'The permission {slug} of the group {group.slug} never applies: {text}.'
                 if restricting:
                     messages.append(Error(text, hint=hint, obj=module, id='permit.E006'))

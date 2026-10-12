@@ -19,6 +19,8 @@ Django system checks of bazis-permit (see `manage.py bazis_doctor`).
 from django.conf import settings
 from django.core.checks import Tags, Warning, register
 
+from bazis.core.schemas import FieldAvail
+
 
 @register()
 def check_relations_view(app_configs, **kwargs):
@@ -297,7 +299,7 @@ def check_actions_anonymous_applied(app_configs, databases=None, **kwargs):
 
 
 #: the restrictions of a field that show it, replacing a `disable`
-SHOWN = frozenset({'enable', 'readonly', 'writeonly'})
+SHOWN = frozenset(it.name for it in (FieldAvail.enable, FieldAvail.readonly, FieldAvail.writeonly))
 
 
 def _disabled_by(field: str, restricts: dict[str, set[str]]) -> str | None:
@@ -306,9 +308,10 @@ def _disabled_by(field: str, restricts: dict[str, set[str]]) -> str | None:
     or None: its own restrictions of availability replace those of `__all__`, as in
     `fields_patch` of the core.
     """
-    key = field if restricts.get(field, set()) & (SHOWN | {'disable'}) else '__all__'
+    disable = FieldAvail.disable.name
+    key = field if restricts.get(field, set()) & (SHOWN | {disable}) else '__all__'
     own = restricts.get(key, set())
-    return key if 'disable' in own and not own & SHOWN else None
+    return key if disable in own and not own & SHOWN else None
 
 
 def required_disabled(groups) -> list[Warning]:
@@ -326,7 +329,7 @@ def required_disabled(groups) -> list[Warning]:
     from bazis.core.introspect import loaded_app, route_sets
     from bazis.core.schemas import CrudApiAction
 
-    from .declare import Group, _model, add_field_condition, permission_problem
+    from .declare import Group, add_field_condition, parse_permission, permission_problem
     from .routes_abstract import PermitRouteBase
 
     if (app := loaded_app()) is None:
@@ -340,19 +343,17 @@ def required_disabled(groups) -> list[Warning]:
         # model → the restrictions and the permissions of each field
         found: dict[type, tuple[dict[str, set[str]], dict[str, list[str]]]] = {}
         for slug in dict.fromkeys(group.permissions):
-            parts = slug.split('.')
+            perm = parse_permission(slug)
             if (
-                parts[2:4] != ['field', 'add']
+                perm is None
+                or (perm.level, perm.operation) != ('field', 'add')
                 or permission_problem(slug)
                 or add_field_condition(slug)
             ):
                 continue
-            model = _model(parts[0], parts[1])
-            status = 1 if hasattr(model, 'get_status_field') else 0
-            field = parts[5 + status]
-            restricts, slugs = found.setdefault(model, ({}, {}))
-            restricts.setdefault(field, set()).update('.'.join(parts[6 + status:]).split('|'))
-            slugs.setdefault(field, []).append(slug)
+            restricts, slugs = found.setdefault(perm.model, ({}, {}))
+            restricts.setdefault(perm.field, set()).update(perm.restricts)
+            slugs.setdefault(perm.field, []).append(slug)
 
         reported = set()
         for model, (restricts, slugs) in found.items():
@@ -488,7 +489,7 @@ def check_add_field_conditions_applied(app_configs, databases=None, **kwargs):
 
     messages = []
     for slug, roles in sorted(found.items()):
-        text, hint, __ = add_field_condition_problem(slug, add_field_condition(slug))
+        text, hint, __ = add_field_condition_problem(slug)
         messages.append(
             Warning(
                 f'The permission {slug} of the roles {", ".join(sorted(roles))} (the database) '

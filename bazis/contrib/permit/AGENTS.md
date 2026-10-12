@@ -117,12 +117,14 @@ ROLES = [Role('client', _('Client'), [CLIENT])]    # groups: Group objects or sl
   dry_run=False)` returns the changes; `dry_run` only lists them.
 - Checks: `permit.E004` (a slug, a duplicate, a group of a role that is not declared),
   `permit.E005` (a permission: grammar, the model is a `PermitModelMixin`, the selector is
-  a relation to a `PermitSelectorMixin` model, the field exists, the restriction is
-  `enable`/`disable`/`readonly`/`filter:`), `permit.E006` (a field permission of `add` with
-  a selector or a status other than `all` that restricts its field, `disable`, `readonly`
-  or `filter:`: it never applies and the restriction is lost, see Field permissions),
-  `permit.W011` (a warning: such a permission that only shows its field, `enable`, which
-  leaves the create stricter than declared),
+  a relation to a `PermitSelectorMixin` model, the field exists, the restriction is one of
+  the schemas of the core, `enable`/`disable`/`readonly`/`writeonly`, `required`/`optional`,
+  `nullable`/`notnull`, `blank`/`notblank`, or `filter:`), `permit.E006` (a field
+  permission of `add` with a selector or a status other than `all` that restricts its
+  field, `disable`, `readonly`, `required`, `notnull`, `notblank` or `filter:`: it never
+  applies and the restriction is lost, see Field permissions), `permit.W011` (a warning:
+  such a permission that only relaxes its field, `enable`, `writeonly`, `optional`,
+  `nullable` or `blank`, which leaves the create stricter than declared),
   `permit.W009` (`bazis_doctor`: a `disable` on
   add of a required field, which the create schema keeps, see Field permissions); with a
   database (`bazis_doctor` from bazis 2.13, against the database it reaches; with an older core only
@@ -300,7 +302,8 @@ per operation (`view`, `add`, `change`) and selector:
   hides the field from every create of the role. `field.add.all.draft.<field>.disable` (the
   initial status too), `field.add.author.<field>.disable` and any other condition never
   apply: `roles.py` refuses them (`permit.E006`, the hint names the slug to write;
-  `enable` is the warning `permit.W011`), `bazis_doctor` reports those of the database (`permit.W010`); before
+  `enable` and the other restrictions that only relax the field are the warning
+  `permit.W011`), `bazis_doctor` reports those of the database (`permit.W010`); before
   bazis-permit 2.11 they did nothing without a word. The `view` and `change` permissions
   keep their selector and status (`field.change.all.draft.price.readonly`). To restrict
   which objects a role creates, use the item permissions of add: `item.add.<selector>`
