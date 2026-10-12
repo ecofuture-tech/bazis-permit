@@ -586,16 +586,29 @@ def test_anonymous_user_model_without_roles(sample_app, monkeypatch):
 @pytest.fixture
 def permit_usage(monkeypatch):
     """
-    Counts the permission services created and the queries of the roles (the role of an
-    anonymous user is loaded by each new service), in every thread (the test client runs
-    the application in its own thread).
+    Counts the permission services created, the queries of the roles (the role of an
+    anonymous user is loaded by each new service) and the reads of the permissions of a
+    role from the cache, in every thread (the test client runs the application in its own
+    thread).
     """
     from django.db.backends import utils
 
+    from bazis.contrib.permit import services
+    from bazis.contrib.permit.schemas import PERMS_CACHE_PREFIX
     from bazis.contrib.permit.services import PermitService
 
-    usage = {'services': 0, 'role_queries': 0}
+    usage = {'services': 0, 'role_queries': 0, 'perms_reads': 0}
     init, execute = PermitService.__init__, utils.CursorWrapper.execute
+    cache = services.cache
+
+    class CountingCache:
+        def __getattr__(self, name):
+            return getattr(cache, name)
+
+        def get(self, key, *args, **kwargs):
+            if key.startswith(PERMS_CACHE_PREFIX):
+                usage['perms_reads'] += 1
+            return cache.get(key, *args, **kwargs)
 
     def counting_init(self, *args, **kwargs):
         usage['services'] += 1
@@ -608,9 +621,10 @@ def permit_usage(monkeypatch):
 
     monkeypatch.setattr(PermitService, '__init__', counting_init)
     monkeypatch.setattr(utils.CursorWrapper, 'execute', counting_execute)
+    monkeypatch.setattr(services, 'cache', CountingCache())
 
     def measure(request):
-        usage.update(services=0, role_queries=0)
+        usage.update(services=0, role_queries=0, perms_reads=0)
         response = request()
         assert response.status_code == 200, response.text
         return dict(usage), response.json()
@@ -622,8 +636,9 @@ def permit_usage(monkeypatch):
 def test_included_relations_share_the_permissions(sample_app, users, permit_usage):
     """
     The core calls `restrict_queryset` on the class for every included relationship: the
-    calls of a request, and the schemas of its route, share one permission service of the
-    user, so the permissions and the roles are not loaded again for each of them.
+    calls of a request share one permission service of the user, and the schemas of the
+    route its permissions, so the permissions and the roles are not loaded again for each
+    of them.
     """
     from entity.models import Bookmark
 
@@ -655,8 +670,8 @@ def test_included_relations_share_the_permissions(sample_app, users, permit_usag
     assert len(data['included']) == 1
     url = f'/api/v1/entity/parent_entity/{parent.id}/'
     none, __ = permit_usage(lambda: client.get(url))
-    # the schemas of the route use its service
-    assert none['services'] == 1
+    # the schemas of the route read the permissions of its service
+    assert none['perms_reads'] == 1
     some, data = permit_usage(lambda: client.get(url, params={'include': 'dependent_entities'}))
     assert len(data['included']) == 1
     assert some == none

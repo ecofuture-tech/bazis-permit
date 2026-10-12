@@ -485,3 +485,26 @@ def test_selector_source_queryset(sample_app, no_selector_warnings, monkeypatch,
     for meeting in shown:
         assert descriptions[str(meeting.id)] == (None if meeting.team else meeting.description)
     assert ids(client.get(URL_TEAM)) == sorted(str(it.id) for it in expected)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_meta_of_a_change_follows_the_written_item(sample_app):
+    """
+    The response of a change answers for the written item: a change that takes the item out
+    of the condition of the `change` permission reports that the user may no longer change
+    it (`crud_actions`), as a later read does. The schemas of the request and of the
+    response evaluate the conditions apart from the checks of the route.
+    """
+    role = role_with(
+        'planner', 'entity.meeting.item.view.all', 'entity.meeting.item.change.title=Planning'
+    )
+    user = user_with('planner', role)
+    meeting = Meeting.objects.create(title='Planning', author=user)
+    client = get_api_client(sample_app, user.jwt_build())
+    url = f'{URL_MEETING}{meeting.id}/?meta=crud_actions'
+
+    assert client.get(url).json()['meta']['crud_actions'] == ['view', 'change']
+    response = client.patch(url, json_data=meeting_patch(meeting, title='Retro'))
+    assert response.status_code == 200, response.content
+    assert response.json()['meta']['crud_actions'] == ['view']
+    assert client.get(url).json()['meta']['crud_actions'] == ['view']

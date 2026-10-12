@@ -14,6 +14,8 @@
 
 from collections import defaultdict
 from collections.abc import Iterable
+from copy import copy
+from typing import Self
 
 from django.apps import apps
 from django.conf import settings
@@ -199,6 +201,21 @@ class PermitService:
         """
         self.user = user or AnonymousUser()
         self.handlers = {}
+        # the service whose permissions this one reads (`with_own_handlers`)
+        self._perms_source = None
+
+    def with_own_handlers(self) -> Self:
+        """
+        A service of the same user that shares the permissions of the role with this one
+        (read once by either) and keeps handlers of its own. A handler keeps what it
+        evaluated on its item, the conditions of the permissions, which a write of the
+        request may change: the schemas of a route have handlers of their own, apart from
+        the checks of the route (`check_access`, the meta field `crud_actions`).
+        """
+        service = copy(self)
+        service.handlers = {}
+        service._perms_source = self._perms_source or self
+        return service
 
     @cached_property
     def perms(self) -> dict:
@@ -206,6 +223,8 @@ class PermitService:
         Parses string permissions into a dictionary, utilizing cache for efficiency.
                 :return: A dictionary representing the permission tree.
         """
+        if self._perms_source is not None:
+            return self._perms_source.perms
         if not hasattr(self.user, 'role_current'):
             raise JsonApiHttpException(
                 HTTP_403_FORBIDDEN, detail=_('User instance anonymous or missing the role_current property')

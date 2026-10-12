@@ -353,7 +353,9 @@ class SchemasPermit(UserDict):
         optional includes.
         """
         self.route_cls = route_cls
-        self.permit_service = route_cls.permit_service_for(user)
+        # the permissions of the service of the route, the handlers of its own: they keep
+        # the conditions evaluated before a write of the request
+        self.permit_service = route_cls.permit_service_for(user).with_own_handlers()
         self.item_or_model = item_or_model
         self.includes = includes
         self.is_response_schema = is_response_schema
