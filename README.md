@@ -369,8 +369,9 @@ ROLES = [Role('client', _('Client'), [CLIENT])]
 - The declarations are applied after the last migration: on a fresh database a data
   migration of the product runs before them and cannot rely on the declared roles.
 - The names are English msgids (`gettext_lazy`): `name_en` and `name_ru` get their
-  translations from the catalogs of the project (`locale/`); `permit.W004` lists the names
-  without a translation into a language of `LANGUAGES`.
+  translations from the catalogs of the project (`locale/`); `manage.py bazis_messages
+  status` of the core lists the names without a translation into a language of
+  `LANGUAGES`.
 - The admin shows declared objects read-only (a declared role still takes the groups of
   the admin) and does not delete them.
 - `manage.py bazis_doctor` checks the declarations: the slugs, the groups of the roles,

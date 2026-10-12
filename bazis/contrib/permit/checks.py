@@ -102,8 +102,7 @@ def check_routes_permit_model(app_configs, **kwargs):
             f'The model {route_cls.model._meta.label} of the permission route '
             f'{route_cls.__module__}.{route_cls.__qualname__} does not support permissions.',
             hint=(
-                'Inherit the model from bazis.contrib.permit.models_abstract.PermitModelMixin '
-                '(a StatusyChildMixin model of bazis-statusy: update bazis-statusy to 2.5), or '
+                'Inherit the model from bazis.contrib.permit.models_abstract.PermitModelMixin, or '
                 'serve it with a route that is not a PermitRouteBase.'
             ),
             obj=route_cls,

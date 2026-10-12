@@ -509,8 +509,12 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         # creation/update actions are not available for proxy models, as they can change the state
         # of visibility of proxy model objects
         if cls.model._meta.proxy:
-            cls.actions_exclude = cls.actions_exclude or []
-            cls.actions_exclude.extend(['action_schema_create', 'action_schema_update'])
+            # a list of its own, as the core makes it: the inherited one belongs to the parent
+            cls.actions_exclude = list(
+                dict.fromkeys(
+                    [*(cls.actions_exclude or []), 'action_schema_create', 'action_schema_update']
+                )
+            )
 
     @http_get('/schema_list/', response_model=dict[str, Any])
     def action_schema_list(self, **kwargs):
