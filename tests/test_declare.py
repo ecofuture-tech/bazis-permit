@@ -367,6 +367,54 @@ def test_valid_permissions(slug):
     assert errors(declaration_messages([('app.roles', Group('decl', 'Decl', [slug]))], [])) == []
 
 
+@pytest.mark.parametrize(
+    ('slug', 'fixed'),
+    [
+        (
+            'entity.meeting.field.add.author.description.disable',
+            'entity.meeting.field.add.all.description.disable',
+        ),
+        (
+            'entity.meeting.field.add.author.__all__.readonly',
+            'entity.meeting.field.add.all.__all__.readonly',
+        ),
+        (
+            'entity.parent_entity.field.add.author=__selector__&is_active=true.description.enable',
+            'entity.parent_entity.field.add.all.description.enable',
+        ),
+        (
+            'entity.child_entity.field.add.author_parent.child_name.filter:^[A-Z]+$',
+            'entity.child_entity.field.add.all.child_name.filter:^[A-Z]+$',
+        ),
+    ],
+)
+def test_add_field_permission_with_a_condition(slug, fixed):
+    """
+    A field permission of add with a selector other than `all` never applies: the create
+    schema is built before the object exists (permit.E006, which names the slug to write);
+    `apply_declarations` refuses it.
+    """
+    messages = errors(declaration_messages([('app.roles', Group('decl', 'Decl', [slug]))], []))
+    assert codes(messages) == ['permit.E006']
+    assert f'The permission {slug} of the group decl never applies' in messages[0].msg
+    assert messages[0].hint == f'Write {fixed}: it applies to every create of the role.'
+    with pytest.raises(ImproperlyConfigured, match='permit.E006'):
+        apply_declarations(groups=[Group('decl', 'Decl', [slug])], roles=[], dry_run=True)
+
+
+@pytest.mark.parametrize(
+    'slug',
+    [
+        'entity.meeting.field.change.author.description.disable',
+        'entity.meeting.field.view.author.description.disable',
+        'entity.meeting.item.add.author',
+    ],
+)
+def test_conditions_of_other_permissions_are_not_e006(slug):
+    """The view and change field permissions and the item permissions keep their condition."""
+    assert errors(declaration_messages([('app.roles', Group('decl', 'Decl', [slug]))], [])) == []
+
+
 def test_the_field_checks_of_the_sample_pass(sample_app):
     assert check_declarations_fields(None) == []
 
@@ -408,7 +456,7 @@ def test_disable_of_a_required_field_on_change_is_not_reported(sample_app):
     ):
         assert disabled_required(sample_app, slug) == []
     # the add permission of the same group is reported alone
-    title = 'entity.meeting.field.add.author.title.disable'
+    title = 'entity.meeting.field.add.all.title.disable'
     assert disabled_required(
         sample_app, title, 'entity.meeting.field.change.author.title.disable'
     ) == [(title, 'title')]
@@ -423,10 +471,12 @@ def test_disable_of_all_fields_reports_the_required_ones_not_shown(sample_app):
     every = 'entity.meeting.field.add.all.__all__.disable'
     assert disabled_required(sample_app, every) == [(every, 'title')]
     assert disabled_required(sample_app, every, 'entity.meeting.field.add.all.title.enable') == []
-    # a permission of another condition is another user's: it does not show the field
+    # a permission of add with a condition never applies (permit.E006): it does not show
+    # the field, and its own disable is not this check
     assert disabled_required(sample_app, every, 'entity.meeting.field.add.author.title.enable') == [
         (every, 'title')
     ]
+    assert disabled_required(sample_app, 'entity.meeting.field.add.author.title.disable') == []
     assert disabled_required(sample_app, 'entity.meeting.field.view.all.title.disable') == []
     # an invalid permission is permit.E005, not this check
     assert disabled_required(sample_app, 'entity.meeting.field.add.all.nothing.disable') == []

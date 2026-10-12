@@ -90,6 +90,10 @@ text = "`disable` on add hides only an optional field: a required one stays in t
 check = "permit.W009"
 
 [[pitfalls]]
+text = "a field permission of add applies only with the condition all (`field.add.all.all.<field>…` on a model with statuses): the create schema is built before the object exists, so `field.add.all.draft…` or `field.add.author…` never applies"
+check = "permit.E006"
+
+[[pitfalls]]
 text = "QuerySet.update() and bulk_create() on roles, groups and permissions do not invalidate the permission cache"
 
 [[pitfalls]]

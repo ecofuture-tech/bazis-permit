@@ -68,6 +68,7 @@ from bazis.core.declare import (  # noqa: F401
 from bazis.core.utils.functools import camel_2_snake
 
 from .models_abstract import LANGUAGES, PermitModelMixin, PermitSelectorMixin
+from .schemas import PERM_ALL
 
 
 #: the slug of a declared group or role
@@ -251,6 +252,21 @@ def permission_problem(slug: str) -> str | None:  # noqa: C901
     return None
 
 
+def add_field_condition(slug: str) -> list[str] | None:
+    """
+    The condition segments (the selector, and the status of a model with statuses) of a
+    valid field permission of `add` when one of them is not `all`, or None. The create
+    schema is built before the object exists, so the field permissions of `add` apply
+    only without a condition: such a permission never applies (permit.E006).
+    """
+    parts = slug.split('.')
+    if parts[2:4] != ['field', 'add']:
+        return None
+    status = 1 if hasattr(_model(parts[0], parts[1]), 'get_status_field') else 0
+    condition = parts[4:5 + status]
+    return None if all(it == PERM_ALL for it in condition) else condition
+
+
 def _duplicates(declared: list[tuple[str, object]], key: str) -> dict[str, list[str]]:
     modules = {}
     for module, it in declared:
@@ -266,8 +282,8 @@ def _name_problem(it) -> str | None:
 
 def declaration_messages(groups, roles) -> list[CheckMessage]:  # noqa: C901
     """
-    The problems of the declarations (the system checks permit.E004 and permit.E005);
-    `apply_declarations` refuses declarations with errors.
+    The problems of the declarations (the system checks permit.E004, permit.E005 and
+    permit.E006); `apply_declarations` refuses declarations with errors.
     """
     messages = []
 
@@ -311,6 +327,17 @@ def declaration_messages(groups, roles) -> list[CheckMessage]:  # noqa: C901
                 error(
                     f'The permission {slug} of the group {group.slug}: {problem}.', module,
                     id='permit.E005',
+                )
+            elif condition := add_field_condition(slug):
+                parts = slug.split('.')
+                fixed = '.'.join([*parts[:4], *[PERM_ALL] * len(condition), *parts[4 + len(condition):]])
+                error(
+                    f'The permission {slug} of the group {group.slug} never applies: a field '
+                    'permission of add applies only without a condition, and this one has '
+                    f'{".".join(condition)}; the create schema is built before the object '
+                    'exists (its selector and status are not known).', module,
+                    hint=f'Write {fixed}: it applies to every create of the role.',
+                    id='permit.E006',
                 )
     return messages
 

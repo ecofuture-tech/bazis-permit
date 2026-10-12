@@ -15,7 +15,7 @@ with roles needs Model of permissions, Roles in the code, Setup and Rules.
 | Model of permissions | you write the permissions: the slug `<app>.<model>.<item\|field>.<operation>.<selector>…`, the operations, the selectors (`all`, `self`, `author`, a relation, a path), the roles of a user, the roles for anonymous users |
 | Roles in the code (`roles.py`) | you declare the roles and the permission groups: `Group`, `Role`, what `migrate` applies, the data migrations, the tests, the checks `permit.E004`, `E005`, `W005`, `W006`, `W009` |
 | Setup | you protect a model: the mixins of the user, the anonymous user and the models, `PermitRouteBase`, the 404 and 403 of the items, the selector arrays, the settings, the users, another route of a protected model, `restrict_queryset` |
-| Field permissions | a role must not see or write some fields: `disable`, `readonly`, `enable`, `__all__`, the fields of a list, a required field on a create (`permit.W009`), the fields the filter, sort and search reach |
+| Field permissions | a role must not see or write some fields: `disable`, `readonly`, `enable`, `__all__`, the fields of a list, a field on a create (`add` only with `all`: `field.add.all.all.<field>`, `permit.E006`; a required one, `permit.W009`), the fields the filter, sort and search reach |
 | Custom actions | an action that is no CRUD: `access_action`, `public`, an aggregate or a report, the actions a user may call (`?meta=custom_actions`), an operation of its own (`AccessAction`) |
 | Rules | before you write the code, once: what every route, action and override must respect, the cache of the permissions |
 
@@ -117,7 +117,9 @@ ROLES = [Role('client', _('Client'), [CLIENT])]    # groups: Group objects or sl
 - Checks: `permit.E004` (a slug, a duplicate, a group of a role that is not declared),
   `permit.E005` (a permission: grammar, the model is a `PermitModelMixin`, the selector is
   a relation to a `PermitSelectorMixin` model, the field exists, the restriction is
-  `enable`/`disable`/`readonly`/`filter:`), `permit.W009` (`bazis_doctor`: a `disable` on
+  `enable`/`disable`/`readonly`/`filter:`), `permit.E006` (a field permission of `add` with
+  a selector or a status other than `all`, which never applies; see Field permissions),
+  `permit.W009` (`bazis_doctor`: a `disable` on
   add of a required field, which the create schema keeps, see Field permissions); with a
   database (`bazis_doctor` from bazis 2.13, against the database it reaches; with an older core only
   `manage.py check --database default`) `permit.W005` (the database differs: migrate) and
@@ -252,10 +254,23 @@ per operation (`view`, `add`, `change`) and selector:
   objects. The conditions are compared as written, not by what they imply: with a view
   permission of another condition (or none) the union may name a field that no object
   the user views shows (its name, never a value).
+- **On add, a field permission takes no condition: `field.add.all.all.<field>`.** The create
+  schema is built before the object exists, so its selector and status are not known (the
+  CREATE schema of a model with statuses accepts an initial `status`). A field permission
+  of `add` applies only with the selector `all` and, on a model with statuses, the status
+  `all`: `field.add.all.all.<field>.disable` (without statuses `field.add.all.<field>.disable`)
+  hides the field from every create of the role. `field.add.all.draft.<field>.disable` (the
+  initial status too), `field.add.author.<field>.disable` and any other condition never
+  apply: `roles.py` refuses them (`permit.E006`, the hint names the slug to write), a
+  permission of the database is logged at a create (`do not apply to a create`); before
+  bazis-permit 2.11 they did nothing without a word. The `view` and `change` permissions
+  keep their selector and status (`field.change.all.draft.price.readonly`). An `item.add`
+  permission is checked by its presence: its selector and status do not restrict a create
+  either.
 - **A required field cannot be hidden from a create.** `disable` on `add` hides a field
   from the create schema only when it is optional: a field required to create an item (a
   model field without `blank=True`, `null=True` or a default) stays in the create schema
-  of the role, so `field.add.<selector>.<field>.disable` changes nothing and a create
+  of the role, so `field.add.all.<field>.disable` changes nothing and a create
   without the field is 422 `ERR_VALIDATE` "Field required" at it. A field the server fills
   (the creator, the owner): make the model field optional (`blank=True`, `null=True` or a
   default), set it in `hook_before_create` of the route (call `super()`), then disable it

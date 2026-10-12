@@ -318,14 +318,15 @@ def required_disabled(groups) -> list[Warning]:
     create an item in the create schema (`fields_patch`): a request without it is 422. The
     update schema hides a field its own `disable` hides whatever its requiredness (bazis
     2.16; `<field>.required` keeps it only against `__all__.disable`, as the permission
-    names it), so a `change` permission is not concerned. Their restrictions are combined per model and
-    condition, as one user with the group gets them, and checked against the create
-    schemas of the permission routes of the model.
+    names it), so a `change` permission is not concerned, nor one of add with a condition,
+    which never applies (permit.E006). Their restrictions are combined per model, as one
+    user with the group gets them, and checked against the create schemas of the
+    permission routes of the model.
     """
     from bazis.core.introspect import loaded_app, route_sets
     from bazis.core.schemas import CrudApiAction
 
-    from .declare import Group, _model, permission_problem
+    from .declare import Group, _model, add_field_condition, permission_problem
     from .routes_abstract import PermitRouteBase
 
     if (app := loaded_app()) is None:
@@ -336,22 +337,25 @@ def required_disabled(groups) -> list[Warning]:
     for module, group in groups:
         if not isinstance(group, Group):
             continue
-        # (model, condition) → the restrictions and the permissions of each field
-        found: dict[tuple, tuple[dict[str, set[str]], dict[str, list[str]]]] = {}
+        # model → the restrictions and the permissions of each field
+        found: dict[type, tuple[dict[str, set[str]], dict[str, list[str]]]] = {}
         for slug in dict.fromkeys(group.permissions):
             parts = slug.split('.')
-            if parts[2:4] != ['field', 'add'] or permission_problem(slug):
+            if (
+                parts[2:4] != ['field', 'add']
+                or permission_problem(slug)
+                or add_field_condition(slug)
+            ):
                 continue
             model = _model(parts[0], parts[1])
             status = 1 if hasattr(model, 'get_status_field') else 0
             field = parts[5 + status]
-            key = (model, tuple(parts[4:5 + status]))
-            restricts, slugs = found.setdefault(key, ({}, {}))
+            restricts, slugs = found.setdefault(model, ({}, {}))
             restricts.setdefault(field, set()).update('.'.join(parts[6 + status:]).split('|'))
             slugs.setdefault(field, []).append(slug)
 
         reported = set()
-        for (model, _condition), (restricts, slugs) in found.items():
+        for model, (restricts, slugs) in found.items():
             for route_cls in routes:
                 factory = route_cls.schema_factories.get(CrudApiAction.CREATE)
                 if route_cls.model is not model or factory is None:
@@ -403,7 +407,8 @@ def check_declarations(app_configs, **kwargs):
     """
     The roles and permission groups declared in the `roles.py` modules: their slugs, the
     groups of the roles, the models, selectors and fields of the permissions
-    (permit.E004, permit.E005). The translations of their names: `bazis_messages status`.
+    (permit.E004, permit.E005), the field permissions of add with a condition, which never
+    apply (permit.E006). The translations of their names: `bazis_messages status`.
     """
     from .declare import declaration_messages, declarations
 
