@@ -353,7 +353,7 @@ class SchemasPermit(UserDict):
         optional includes.
         """
         self.route_cls = route_cls
-        self.permit_service = route_cls.InjectPermit.__annotations__['permit'](user)
+        self.permit_service = route_cls.permit_service_for(user)
         self.item_or_model = item_or_model
         self.includes = includes
         self.is_response_schema = is_response_schema
@@ -463,6 +463,8 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
     """
 
     abstract: bool = True
+    #: the class of `schemas` and `schemas_responses`
+    schemas_class: type[SchemasPermit] = SchemasPermit
     schemas: SchemasPermit
     schemas_responses: SchemasPermit
 
@@ -562,7 +564,7 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
 
     def schemas_make(self):
         """
-        Creates and initializes the SchemasPermit instance for the route.
+        Creates the schemas of the route (`schemas_class`) for the user of the request.
         """
 
         def get_item():
@@ -571,10 +573,10 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
             """
             return self.item or self.model
 
-        self.schemas = SchemasPermit(
+        self.schemas = self.schemas_class(
             type(self), self.inject.user, get_item, getattr(self.inject, 'include', [])
         )
-        self.schemas_responses = SchemasPermit(
+        self.schemas_responses = self.schemas_class(
             type(self), self.inject.user, get_item, getattr(self.inject, 'include', []), True
         )
 

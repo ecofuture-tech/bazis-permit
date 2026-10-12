@@ -622,8 +622,8 @@ def permit_usage(monkeypatch):
 def test_included_relations_share_the_permissions(sample_app, users, permit_usage):
     """
     The core calls `restrict_queryset` on the class for every included relationship: the
-    calls of a request share one permission service of the user, so the permissions and
-    the roles are not loaded again for each relationship.
+    calls of a request, and the schemas of its route, share one permission service of the
+    user, so the permissions and the roles are not loaded again for each of them.
     """
     from entity.models import Bookmark
 
@@ -655,6 +655,8 @@ def test_included_relations_share_the_permissions(sample_app, users, permit_usag
     assert len(data['included']) == 1
     url = f'/api/v1/entity/parent_entity/{parent.id}/'
     none, __ = permit_usage(lambda: client.get(url))
+    # the schemas of the route use its service
+    assert none['services'] == 1
     some, data = permit_usage(lambda: client.get(url, params={'include': 'dependent_entities'}))
     assert len(data['included']) == 1
     assert some == none
