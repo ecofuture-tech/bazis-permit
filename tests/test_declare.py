@@ -422,11 +422,11 @@ def test_add_field_permission_with_a_condition(slug, fixed):
 def test_add_field_permission_with_a_condition_that_shows(slug, fixed):
     """
     A field permission of add with a condition that only shows its field (`enable`) never
-    applies either, but the create is stricter than declared: permit.E006 is a warning, the
+    applies either, but the create is stricter than declared: the warning permit.W011, the
     hint does not tell to show the field to every create, and the declarations are applied.
     """
     messages = declaration_messages([('app.roles', Group('decl', 'Decl', [slug]))], [])
-    assert codes(messages) == ['permit.E006']
+    assert codes(messages) == ['permit.W011']
     assert errors(messages) == []
     assert f'The permission {slug} of the group decl never applies' in messages[0].msg
     assert messages[0].hint == (
@@ -465,8 +465,8 @@ def test_add_field_permissions_of_mixed_groups(monkeypatch):
     )
     messages = check_declarations(None)
     assert sorted((it.id, it.is_serious(), it.msg.split()[2]) for it in messages) == [
-        ('permit.E006', False, showing),
         ('permit.E006', True, restricting),
+        ('permit.W011', False, showing),
     ]
 
 
@@ -601,7 +601,7 @@ def test_add_field_conditions_of_the_database(monkeypatch):
     permit.W010: the field permissions of add with a condition that the roles of the
     database have (the admin, the API), with the roles, by the kind of the restriction. Not
     reported: a permission of no role, the field permissions of add without a condition, of
-    the other operations, the declared ones (permit.E006).
+    the other operations, the declared ones (permit.E006, permit.W011).
     """
     assert check_add_field_conditions_applied(None) == []
     assert check_add_field_conditions_applied(None, databases=['default']) == []
@@ -637,7 +637,7 @@ def test_add_field_conditions_of_the_database(monkeypatch):
     assert messages[1].msg.startswith(f'The permission {showing} of the roles admin_editor')
     assert messages[1].hint.startswith('Remove it, or write entity.meeting.field.add.all.title.enable')
 
-    # a declared permission of the role is permit.E006, not this check
+    # a declared permission of the role is permit.W011, not this check
     monkeypatch.setattr(
         declare,
         'declarations',

@@ -13,9 +13,9 @@ with roles needs Model of permissions, Roles in the code, Setup and Rules.
 | Section | Read it when |
 |---|---|
 | Model of permissions | you write the permissions: the slug `<app>.<model>.<item\|field>.<operation>.<selector>…`, the operations, the selectors (`all`, `self`, `author`, a relation, a path), the roles of a user, the roles for anonymous users |
-| Roles in the code (`roles.py`) | you declare the roles and the permission groups: `Group`, `Role`, what `migrate` applies, the data migrations, the tests, the checks `permit.E004`, `E005`, `E006`, `W005`, `W006`, `W009`, `W010` |
+| Roles in the code (`roles.py`) | you declare the roles and the permission groups: `Group`, `Role`, what `migrate` applies, the data migrations, the tests, the checks `permit.E004`, `E005`, `E006`, `W005`, `W006`, `W009`, `W010`, `W011` |
 | Setup | you protect a model: the mixins of the user, the anonymous user and the models, `PermitRouteBase`, the 404 and 403 of the items, the check of a created item, the selector arrays, the settings, the users, another route of a protected model, `restrict_queryset` |
-| Field permissions | a role must not see or write some fields: `disable`, `readonly`, `enable`, `__all__`, the fields of a list, a field on a create (`add` only with `all`: `field.add.all.all.<field>`, `permit.E006`; a required one, `permit.W009`), the fields the filter, sort and search reach |
+| Field permissions | a role must not see or write some fields: `disable`, `readonly`, `enable`, `__all__`, the fields of a list, a field on a create (`add` only with `all`: `field.add.all.all.<field>`, `permit.E006`, `W011`; a required one, `permit.W009`), the fields the filter, sort and search reach |
 | Custom actions | an action that is no CRUD: `access_action`, `public`, an aggregate or a report, the actions a user may call (`?meta=custom_actions`), an operation of its own (`AccessAction`) |
 | Rules | before you write the code, once: what every route, action and override must respect, the cache of the permissions |
 
@@ -119,9 +119,10 @@ ROLES = [Role('client', _('Client'), [CLIENT])]    # groups: Group objects or sl
   `permit.E005` (a permission: grammar, the model is a `PermitModelMixin`, the selector is
   a relation to a `PermitSelectorMixin` model, the field exists, the restriction is
   `enable`/`disable`/`readonly`/`filter:`), `permit.E006` (a field permission of `add` with
-  a selector or a status other than `all`, which never applies, see Field permissions: an
-  error for `disable`, `readonly` and `filter:`, whose restriction is lost; a warning for
-  `enable`, which leaves the create stricter than declared),
+  a selector or a status other than `all` that restricts its field, `disable`, `readonly`
+  or `filter:`: it never applies and the restriction is lost, see Field permissions),
+  `permit.W011` (a warning: such a permission that only shows its field, `enable`, which
+  leaves the create stricter than declared),
   `permit.W009` (`bazis_doctor`: a `disable` on
   add of a required field, which the create schema keeps, see Field permissions); with a
   database (`bazis_doctor` from bazis 2.13, against the database it reaches; with an older core only
@@ -283,7 +284,7 @@ per operation (`view`, `add`, `change`) and selector:
   hides the field from every create of the role. `field.add.all.draft.<field>.disable` (the
   initial status too), `field.add.author.<field>.disable` and any other condition never
   apply: `roles.py` refuses them (`permit.E006`, the hint names the slug to write;
-  a warning for `enable`), `bazis_doctor` reports those of the database (`permit.W010`); before
+  `enable` is the warning `permit.W011`), `bazis_doctor` reports those of the database (`permit.W010`); before
   bazis-permit 2.11 they did nothing without a word. The `view` and `change` permissions
   keep their selector and status (`field.change.all.draft.price.readonly`). To restrict
   which objects a role creates, use the item permissions of add: `item.add.<selector>`

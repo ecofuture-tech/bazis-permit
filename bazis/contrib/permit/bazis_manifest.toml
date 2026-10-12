@@ -94,6 +94,10 @@ text = "a field permission of add applies only with the condition all (`field.ad
 check = "permit.E006"
 
 [[pitfalls]]
+text = "a field permission of add with a condition that only shows its field (enable) never applies: the create stays stricter than declared"
+check = "permit.W011"
+
+[[pitfalls]]
 text = "a field permission of add with a condition, made in the admin or the API, never applies"
 check = "permit.W010"
 

@@ -312,11 +312,11 @@ def _name_problem(it) -> str | None:
 
 def declaration_messages(groups, roles) -> list[CheckMessage]:  # noqa: C901
     """
-    The problems of the declarations (the system checks permit.E004, permit.E005 and
-    permit.E006); `apply_declarations` refuses declarations with errors. permit.E006 is an
-    error for a field permission of add with a condition that restricts its field (the
-    restriction never applies) and a warning for one that only shows it (`enable`: the
-    create stays stricter than declared).
+    The problems of the declarations (the system checks permit.E004, permit.E005,
+    permit.E006 and permit.W011); `apply_declarations` refuses declarations with errors. A
+    field permission of add with a condition never applies: permit.E006 (an error) for one
+    that restricts its field (the restriction is lost), permit.W011 (a warning) for one that
+    only shows it (`enable`: the create stays stricter than declared).
     """
     messages = []
 
@@ -363,15 +363,11 @@ def declaration_messages(groups, roles) -> list[CheckMessage]:  # noqa: C901
                 )
             elif condition := add_field_condition(slug):
                 text, hint, restricting = add_field_condition_problem(slug, condition)
-                messages.append(
-                    (Error if restricting else Warning)(
-                        f'The permission {slug} of the group {group.slug} never applies: '
-                        f'{text}.',
-                        hint=hint,
-                        obj=module,
-                        id='permit.E006',
-                    )
-                )
+                text = f'The permission {slug} of the group {group.slug} never applies: {text}.'
+                if restricting:
+                    messages.append(Error(text, hint=hint, obj=module, id='permit.E006'))
+                else:
+                    messages.append(Warning(text, hint=hint, obj=module, id='permit.W011'))
     return messages
 
 

@@ -460,7 +460,7 @@ def check_add_field_conditions_applied(app_configs, databases=None, **kwargs):
     permit.W010: the field permissions of add with a condition (a selector or a status other
     than `all`) that the roles of the database have (made in the admin or the API, or the
     groups the admin attached to a declared role), which never apply: the create schema is
-    built before the object exists. The declared ones are permit.E006. Skipped while
+    built before the object exists. The declared ones are permit.E006 or permit.W011. Skipped while
     migrations are not applied.
     """
     from django.apps import apps
