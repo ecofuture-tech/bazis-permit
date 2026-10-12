@@ -584,8 +584,17 @@ def test_invalid_groups_and_roles():
 
 
 def test_untranslated_is_deprecated():
-    """Kept for bazis-statusy < 2.12, which imports it; removed in bazis-permit 2.12."""
-    from bazis.contrib.permit.declare import untranslated
+    """
+    Kept for bazis-statusy < 2.12, which imports it with the helpers of the core (its
+    import below); removed in bazis-permit 3.0.
+    """
+    from bazis.contrib.permit.declare import (  # noqa: F401
+        discover,
+        lock,
+        migrations_complete,
+        translations,
+        untranslated,
+    )
 
     with pytest.warns(DeprecationWarning, match='bazis_messages status'):
         assert untranslated([_('Not translated anywhere')]) == {'ru': ['Not translated anywhere']}

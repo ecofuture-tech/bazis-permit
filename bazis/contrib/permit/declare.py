@@ -55,9 +55,10 @@ from django.utils.functional import Promise
 
 from translated_fields import to_attribute
 
-# migrations_complete (with discover and lock) stays importable from here only for
-# bazis-statusy < 2.12
-from bazis.core.declare import (  # noqa: F401
+# bazis-statusy < 2.12 imports discover, lock, migrations_complete (and untranslated) from
+# here, and its requirement of bazis-permit has no upper bound: keep them importable until
+# bazis-permit 3.0
+from bazis.core.declare import (
     ManagedSync,
     apply_after_migrate,
     discover,
@@ -140,14 +141,14 @@ def translations(text: str | Promise, field: str = 'name') -> dict[str, str]:
 
 def untranslated(texts: list[str | Promise]) -> dict[str, list[str]]:
     """
-    Deprecated, removed in bazis-permit 2.12: kept for bazis-statusy < 2.12, which imports
-    it. The untranslated texts of a project are listed by `manage.py bazis_messages status`
+    Deprecated, removed in bazis-permit 3.0: kept for bazis-statusy < 2.12, which imports
+    it and whose requirement of bazis-permit has no upper bound. The untranslated texts of a project are listed by `manage.py bazis_messages status`
     of the core. The texts that have no translation in a language of LANGUAGES other than
     English (the language of the msgids), by language.
     """
     warnings.warn(
         'bazis.contrib.permit.declare.untranslated is deprecated and will be removed in '
-        'bazis-permit 2.12: use manage.py bazis_messages status.',
+        'bazis-permit 3.0: use manage.py bazis_messages status.',
         DeprecationWarning,
         stacklevel=2,
     )
