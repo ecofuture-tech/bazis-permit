@@ -20,7 +20,6 @@ from django.db.models import QuerySet
 
 from bazis.contrib.permit.models_abstract import PermitSelectorMixin
 from bazis.contrib.users import get_user_model
-from bazis.core.schemas import CrudAccessAction
 from bazis.core.utils.query_complex import QueryComplex, QueryComplexItem
 
 from .schemas import PERM_ALL, PERM_SELF
@@ -33,19 +32,6 @@ if TYPE_CHECKING:
     from bazis.contrib.permit.schemas import PermitStructMixin
     from bazis.core.models_abstract import JsonApiMixin
     User = get_user_model()
-
-
-def field_restrict_queryset(qs: QuerySet, context: dict) -> QuerySet:
-    """
-    Restrict the given queryset based on the context's route and action. If the
-    context contains a route with a 'restrict_queryset' method, this method will be
-    called with the queryset and action (defaulting to CrudAccessAction.VIEW).
-    Otherwise, the original queryset is returned.
-    """
-    if 'route' in context and hasattr(context['route'], 'restrict_queryset'):
-        action = context.get('restrict_action', CrudAccessAction.VIEW)
-        return context['route'].restrict_queryset(qs, action)
-    return qs
 
 
 def is_model_permit(model: 'JsonApiMixin'):

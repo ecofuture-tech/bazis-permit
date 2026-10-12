@@ -156,15 +156,6 @@ class PermitHandler:
         return perms
 
     @cached_property
-    def perms_item_groups(self) -> list[tuple[list[dict], QueryComplex]]:
-        """
-        Cached property that returns a list of grouped permission values for a specific
-        item context.
-        """
-        perms = self._get_perms_groups(self.perms_item)
-        return perms
-
-    @cached_property
     def perms_field_groups(self) -> list[tuple[list[dict], QueryComplex]]:
         """
         Cached property that returns a list of grouped permission values for a specific

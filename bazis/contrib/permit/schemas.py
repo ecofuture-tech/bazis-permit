@@ -29,7 +29,6 @@ PATTERN_SELECTORS = r'^autogen_(.+)_selectors$'
 def ATTR_SELECTORS(x):  # noqa: N802
     return f'autogen_{x}_selectors'
 
-ANONYMOUS_ID = 'anon'
 PERMS_CACHE_PREFIX = 'users_perms::'
 PERMS_CACHE_VERSION_KEY = 'users_perms_version'
 
