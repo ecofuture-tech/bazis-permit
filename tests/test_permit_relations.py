@@ -42,6 +42,7 @@ PERMISSIONS = [
     'entity.dependent_entity.item.add.all',
     'entity.dependent_entity.item.view.all',
     'entity.dependent_entity.item.change.author',
+    'entity.dependent_entity.item.delete.author',
 ]
 
 
@@ -244,8 +245,9 @@ def test_relations_check_reverse_requires_change(sample_app, users):
 @pytest.mark.django_db(transaction=True)
 def test_relations_check_reverse_unlinked_requires_change(sample_app, users):
     """
-    Leaving an object out of a reverse relation unlinks it (here deletes it: its foreign
-    key is required), so it needs the change permission too.
+    Leaving an object out of a reverse relation unlinks it, so it needs the change
+    permission too. Here its foreign key is required, so the core deletes it, which also
+    needs the delete permission (bazis 2.16).
     """
     owner, stranger = users
     own_parent = factories.ParentEntityFactory.create(author=stranger, child_entities=False)
