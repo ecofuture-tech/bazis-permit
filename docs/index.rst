@@ -84,7 +84,7 @@ General Format of Permissions
       - Example can be found here: :py:class:`~bazis.contrib.statusy.services.PermitStatusyService`
     - Create your own route class inherited from :py:class:`~bazis.contrib.permit.routes_abstract.PermitRouteBase`
       - In it, in the Inject class, set the permit attribute to a Depends link to the created service
-      - Example can be found here: :py:class:`~bazis.contrib.statusy.routes_abstract.StatusyPermitRouteSetBase`
+      - Example can be found here: :py:class:`~bazis.contrib.statusy.routes_abstract.StatusySimpleRouteSetBase`
 - **SELECTOR** - the name of the field in the model (LABEL_MODEL). The value of this field from a specific object will be the link between the permission and the object. Description of working with selectors - below.
 
 Selectors
