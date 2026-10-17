@@ -33,13 +33,13 @@ classifiers = [
     "Framework :: FastAPI",
 ]
 dependencies = [
-    "bazis>=2.7.0",  # raise to >=2.16.0 at the release: public/access_action of the actions, throttle, bazis.core.declare, get_fields_hidden, the update schema hides a disabled required field
+    "bazis>=2.16.0",
     "bazis-users>=2.3.0",
 ]
 
 [project.optional-dependencies]
 test = [
-    "bazis-test-utils>=2.3.0",  # raise to >=2.5.2 at the release: the plugin resets the throttles
+    "bazis-test-utils>=2.5.2",
     # the sample project uses AuthorMixin
     "bazis-author>=2.3.0",
 ]
