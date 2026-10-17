@@ -34,14 +34,14 @@ classifiers = [
 ]
 dependencies = [
     "bazis>=2.16.0",
-    "bazis-users>=2.3.0",
+    "bazis-users>=2.9.0",
 ]
 
 [project.optional-dependencies]
 test = [
     "bazis-test-utils>=2.5.2",
     # the sample project uses AuthorMixin
-    "bazis-author>=2.3.0",
+    "bazis-author>=2.5.0",
 ]
 dev = [
     "ruff"
