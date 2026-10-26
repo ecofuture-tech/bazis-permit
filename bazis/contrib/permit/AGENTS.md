@@ -325,10 +325,16 @@ per operation (`view`, `add`, `change`) and selector:
   declare `readonly` on `change`.
 - **The filter, the sorting and the search.** With Bazis 2.9 the `filter`, `sort` and
   `search` of a request reach only the fields the field permissions show the user in
-  every object: `PermitRouteBase.query_fields(user=None,
+  every object: `PermitRouteBase.query_fields(user=None, *, api_action=CrudApiAction.LIST,
   **kwargs)` (bazis-permit 2.11; before, any field shown in some object, and every field
-  when an object could match no field permission). A field hidden in some objects, also
-  only in those of a status or a selector the user cannot view, is 400 `ERR_FILTER` (also
+  when an object could match no field permission). The filter and the sorting start with
+  the fields of the LIST schema of the route, the search (`search`, `$search`, the
+  `search_fields`) with those of the LIST or the RETRIEVE schema (bazis-permit 2.12 with
+  bazis 2.23): a field a route leaves out of its list but shows on its card is searched
+  where the field permissions show it in every object, and a key of `filter` or `sort` by
+  it is 400. A route that serves no card (no `action_retrieve`) searches its LIST fields
+  only. A field hidden in some objects, also only in those of a status or a selector the
+  user cannot view, is 400 `ERR_FILTER` (also
   through a relation, `meetings__description`) and left out of the search, so its values
   cannot be found by trial; the conditions are not compared with those of `item.view`.
   A public subset of the fields (a role for anonymous users that views the open objects)
@@ -503,7 +509,10 @@ class CertificateRouteSet(PermitRouteBase):
 - Override `restrict_queryset(qs, access_action, user=None, permit=None, **kwargs)` with
   `**kwargs`: the core calls it on the class.
 - A field the field permissions hide from a user in some of the objects he views is not
-  filterable, sortable or searchable for him (see Field permissions).
+  filterable, sortable or searchable for him (see Field permissions); the search applies
+  them to the fields of the card (RETRIEVE schema) as to those of the list. An override of
+  `query_fields` keeps `api_action` keyword-only, accepts `**kwargs` and narrows both
+  actions the same way.
 - Permissions are cached per user for `BAZIS_PERMISSION_CACHE_EXPIRE` seconds and
   invalidated when roles, groups or permissions change through the ORM (`save`, `delete`,
   m2m); `QuerySet.update()` and `bulk_create()` do not invalidate the cache.

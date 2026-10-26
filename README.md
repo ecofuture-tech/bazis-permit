@@ -314,14 +314,12 @@ Three tools restrict the objects an item references through its relationships:
   and `search` of a request reach only the fields the field permissions show the user
   (`PermitRouteBase.query_fields`), on the route and through a relation of another route
   into the objects of the model; the related objects are restricted by `restrict_queryset`.
-  A field a `view` field permission hides from the user in every object of the list is 400
-  `ERR_FILTER` (as an unknown field), and a hidden search field is left out of the search.
-  The scope is per user, not per object: a field shown in only some objects (a
-  field permission with a selector such as `author`), or in an object that no field
-  permission matches (such an object has every field), can be filtered, sorted and
-  searched in all the objects the user sees. Hide such a field from the route (`fields`)
-  if its values must not be found by trial. The conditions of the permissions themselves
-  (selectors, `filter:` restrictions) are not restricted.
+  The filter and the sorting reach the fields of the LIST schema, the search those of the
+  LIST or the RETRIEVE schema (bazis-permit 2.12 with Bazis 2.23: a field only the card
+  shows is searched, not filtered). A field the field permissions hide from the user in
+  some object is 400 `ERR_FILTER` (as an unknown field), and a hidden search field is left
+  out of the search, so its values cannot be found by trial. The conditions of the
+  permissions themselves (selectors, `filter:` restrictions) are not restricted.
 
 ### Permission Cache
 

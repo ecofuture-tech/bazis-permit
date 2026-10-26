@@ -72,7 +72,7 @@ text = "the model of a PermitRouteBase route must be a PermitModelMixin"
 check = "permit.W003"
 
 [[pitfalls]]
-text = "filter, sort and search reach only the fields the field permissions show the user in every object (400 ERR_FILTER otherwise)"
+text = "filter, sort and search reach only the fields the field permissions show the user in every object (400 ERR_FILTER otherwise); filter and sort those of the LIST schema, search those of LIST or RETRIEVE"
 
 [[pitfalls]]
 text = "the routes of an item answer 404 for an item the user cannot view and 403 for one he views but cannot change or delete"
