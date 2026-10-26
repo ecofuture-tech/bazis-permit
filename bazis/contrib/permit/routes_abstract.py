@@ -698,16 +698,19 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         return permit if hasattr(permit.user, 'role_current') else None
 
     @classmethod
-    def query_fields(cls, user=None, **kwargs) -> list[SchemaField]:
+    def query_fields(
+        cls, user=None, *, api_action: CrudApiAction = CrudApiAction.LIST, **kwargs
+    ) -> list[SchemaField]:
         """
-        The fields of the LIST schema of the route the field permissions of the user show in
-        every object (the filter, the sorting and the search of a request start with them,
-        also through a relation into the objects of the model; a field shown in only some
-        objects would tell its values in the others by trial), none if the user cannot have
-        the roles of bazis-permit. An object has the field permissions of every field group
-        it matches (`perms_field_groups`): those without a condition and any of the others,
-        so a field must be shown by those without a condition alone and with each of the
-        others. A restriction that shows a field wins over one that hides it, so a
+        The fields of the schema of a read action of the route (`query_schema_factory` of the
+        core: LIST, or RETRIEVE when the route serves it) the field permissions of the user
+        show in every object, none if the user cannot have the roles of bazis-permit. The
+        filter and the sorting of a request start with those of LIST, the search with those
+        of LIST and RETRIEVE, also through a relation into the objects of the model; a field
+        shown in only some objects would tell its values in the others by trial. An object
+        has the field permissions of every field group it matches (`perms_field_groups`):
+        those without a condition and any of the others, so a field must be shown by those
+        without a condition alone and with each of the others. A restriction that shows a field wins over one that hides it, so a
         combination of conditional groups hides a field only if one of them does. The
         conditions are not compared with those of `item.view`: a field hidden only in the
         objects the user cannot see is not reachable either. Which objects are reached is
@@ -715,11 +718,8 @@ class PermitRouteBase(RestrictedQsRouteMixin, UserRouteBase):
         """
         if (permit := cls._permit_service_on_class(user)) is None:
             return []
-        handler = permit.handler(CrudApiAction.LIST.access_action, cls.model)
-        factory = cls.schema_factories.get(CrudApiAction.LIST) or cls.build_schema_factory(
-            CrudApiAction.LIST
-        )
-        return fields_shown_everywhere(factory, handler)
+        handler = permit.handler(api_action.access_action, cls.model)
+        return fields_shown_everywhere(cls.query_schema_factory(api_action), handler)
 
     @class_or_instance_method
     def restrict_queryset(

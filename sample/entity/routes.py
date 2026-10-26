@@ -18,7 +18,13 @@ from bazis.contrib.author.routes_abstract import AuthorRouteBase
 from bazis.contrib.permit.routes_abstract import PermitRouteBase
 from bazis.core.routes_abstract.initial import http_get, http_post, route_declare
 from bazis.core.routes_abstract.jsonapi import JsonapiRouteBase
-from bazis.core.schemas import AccessAction, CrudAccessAction, SchemaField, SchemaFields
+from bazis.core.schemas import (
+    AccessAction,
+    CrudAccessAction,
+    CrudApiAction,
+    SchemaField,
+    SchemaFields,
+)
 from bazis.core.throttle import throttle
 
 
@@ -136,7 +142,47 @@ class MeetingRouteSet(PermitRouteBase, AuthorRouteBase):
     """
 
     model = apps.get_model('entity.Meeting')
+    default_route = True
     search_fields = ['title', 'description']
+
+
+class MeetingCardRouteSet(PermitRouteBase, AuthorRouteBase):
+    """
+    The list of the meetings without their description, which their cards show: the search
+    reaches the description where the field permissions show it in every object, the filter
+    and the sorting do not (the LIST schema has no description).
+    """
+
+    model = apps.get_model('entity.Meeting')
+    actions = ['action_list', 'action_retrieve', 'action_schema_list', 'action_schema_retrieve']
+    search_fields = ['title', 'description']
+
+    fields = {
+        CrudApiAction.LIST: SchemaFields(exclude={'description': None}),
+    }
+
+    @classmethod
+    def get_url_prefix(cls) -> str:
+        return '/entity/meeting_card'
+
+
+class MeetingColumnsRouteSet(PermitRouteBase, AuthorRouteBase):
+    """
+    The same list of the meetings without the cards (the responses of an update show the
+    description of the meetings the user changes, not of every meeting of the list): the
+    search does not reach the description.
+    """
+
+    model = apps.get_model('entity.Meeting')
+    actions = ['action_list', 'action_update', 'action_schema_list']
+
+    fields = {
+        CrudApiAction.LIST: SchemaFields(exclude={'description': None}),
+    }
+
+    @classmethod
+    def get_url_prefix(cls) -> str:
+        return '/entity/meeting_columns'
 
 
 class BookmarkRouteSet(JsonapiRouteBase):
